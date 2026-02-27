@@ -1,5 +1,5 @@
 import XCTest
-@testable import ClaudeSquadLib
+@testable import ClaudeSquad
 
 final class TmuxManagerTests: XCTestCase {
 

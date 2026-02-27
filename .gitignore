@@ -1,12 +1,15 @@
-.build/
-*.xcodeproj
-*.xcworkspace
-.swiftpm/
 .DS_Store
-xcuserdata/
-*.xccheckout
-*.moved-aside
 DerivedData/
-*.hmap
-*.ipa
+xcuserdata/
 *.xcarchive
+*.ipa
+*.hmap
+*.moved-aside
+
+# generated xcode project
+ClaudeSquad.xcodeproj
+
+# SPM artifacts (no longer used, but ignore just in case)
+.build/
+.swiftpm/
+Package.swift

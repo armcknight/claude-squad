@@ -20,9 +20,8 @@ final class MenuBarController {
     private func setupStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = statusItem.button {
-            button.image = NSImage(systemSymbolName: "cpu", accessibilityDescription: "Claude Squad")
+            button.image = NSImage(systemSymbolName: "busts_in_silhouette", accessibilityDescription: "Claude Squad")
             button.imagePosition = .imageLeading
-            button.title = " Claude"
         }
         // Build an initial (empty) menu right away.
         rebuildMenu(sessions: [])

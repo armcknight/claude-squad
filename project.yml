@@ -1,0 +1,63 @@
+name: ClaudeSquad
+
+options:
+  bundleIdPrefix: com.armcknight
+  xcodeVersion: 16.0
+  createIntermediateGroups: true
+
+configs:
+  Debug: debug
+  Release: release
+
+configFiles:
+  Debug: config/Project.xcconfig
+  Release: config/Project.xcconfig
+
+fileGroups:
+  - config
+  - README.md
+  - Makefile
+  - Brewfile
+  - project.yml
+  - .gitignore
+  - .claude
+
+targets:
+  ClaudeSquad:
+    type: application
+    platform: macOS
+    deploymentTarget: "13.0"
+    sources:
+      - Sources/ClaudeSquad
+    configFiles:
+      Debug: config/ClaudeSquad.xcconfig
+      Release: config/ClaudeSquad.xcconfig
+
+  ClaudeSquadTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - Tests/ClaudeSquadTests
+    dependencies:
+      - target: ClaudeSquad
+    configFiles:
+      Debug: config/ClaudeSquadTests.xcconfig
+      Release: config/ClaudeSquadTests.xcconfig
+
+schemes:
+  ClaudeSquad:
+    build:
+      targets:
+        ClaudeSquad: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - ClaudeSquadTests
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release
