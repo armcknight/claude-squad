@@ -10,16 +10,22 @@ final class SessionMonitor: ObservableObject {
     /// Set to the most recent error string if a refresh cycle fails.
     @Published private(set) var lastError: String?
 
-    private let tmux: TmuxManager
+    private let detector: ClaudeSessionDetector
     private let refreshInterval: TimeInterval
     private var timer: Timer?
 
-    /// Tracks when each session (by id) first transitioned to `.waitingForInput`
+    /// Tracks when each session (by id) first transitioned to a waiting state
     /// so that the `since` date persists across refresh cycles.
     private var waitingSince: [String: Date] = [:]
 
-    init(tmux: TmuxManager = .shared, refreshInterval: TimeInterval = 3) {
-        self.tmux = tmux
+    /// Tracks the last-known status type per session for transition detection.
+    private var previousStatusType: [String: Int] = [:]
+
+    /// Callback fired when a session transitions to a state needing attention.
+    var onNeedsAttention: ((_ session: ClaudeSession) -> Void)?
+
+    init(detector: ClaudeSessionDetector = .shared, refreshInterval: TimeInterval = 3) {
+        self.detector = detector
         self.refreshInterval = refreshInterval
     }
 
@@ -43,10 +49,11 @@ final class SessionMonitor: ObservableObject {
         DispatchQueue.global(qos: .utility).async { [weak self] in
             guard let self else { return }
             do {
-                let rawInfos = try self.tmux.probeSessions()
-                let sessions = self.buildSessions(from: rawInfos)
-                let sorted = sessions.sorted()
+                let detected = try self.detector.detectSessions()
+                let stabilized = self.stabilizeTimestamps(detected)
+                let sorted = stabilized.sorted()
                 DispatchQueue.main.async {
+                    self.checkTransitions(newSessions: sorted)
                     self.sessions = sorted
                     self.lastError = nil
                 }
@@ -58,33 +65,54 @@ final class SessionMonitor: ObservableObject {
         }
     }
 
-    // MARK: - Session construction with timestamp management
+    // MARK: - Timestamp stabilization
 
-    /// Converts raw probe results into `ClaudeSession` values, preserving the
-    /// `waitingSince` date so that the elapsed-wait duration grows monotonically.
-    private func buildSessions(from rawInfos: [TmuxManager.RawSessionInfo]) -> [ClaudeSession] {
+    /// Preserves the original "started waiting" timestamps across poll cycles
+    /// so that wait durations grow monotonically rather than resetting each cycle.
+    private func stabilizeTimestamps(_ sessions: [ClaudeSession]) -> [ClaudeSession] {
         let now = Date()
-        var updated: [ClaudeSession] = []
+        var result: [ClaudeSession] = []
+        let currentIDs = Set(sessions.map(\.id))
 
-        let probeIDs = Set(rawInfos.map(\.name))
+        // Remove stale entries.
+        waitingSince = waitingSince.filter { currentIDs.contains($0.key) }
 
-        // Remove timestamps for sessions that are no longer detected.
-        waitingSince = waitingSince.filter { probeIDs.contains($0.key) }
-
-        for info in rawInfos {
-            let status: SessionStatus
-            if info.isWaiting {
-                // Keep the original "started waiting" date if already tracked.
-                let since = waitingSince[info.name] ?? now
-                waitingSince[info.name] = since
-                status = .waitingForInput(since: since)
-            } else {
-                // Clear tracking when the session transitions back to running.
-                waitingSince.removeValue(forKey: info.name)
-                status = .running
+        for var session in sessions {
+            switch session.status {
+            case .waitingIdle:
+                let since = waitingSince[session.id] ?? now
+                waitingSince[session.id] = since
+                session.status = .waitingIdle(since: since)
+            case .waitingForQuestion(_, let question):
+                let since = waitingSince[session.id] ?? now
+                waitingSince[session.id] = since
+                session.status = .waitingForQuestion(since: since, question: question)
+            default:
+                waitingSince.removeValue(forKey: session.id)
             }
-            updated.append(ClaudeSession(id: info.name, status: status, paneTTY: info.tty))
+            result.append(session)
         }
-        return updated
+        return result
+    }
+
+    // MARK: - Transition detection
+
+    /// Fires `onNeedsAttention` when a session newly transitions to a waiting state.
+    private func checkTransitions(newSessions: [ClaudeSession]) {
+        for session in newSessions {
+            let currentType = session.status.sortPriority
+            let previousType = previousStatusType[session.id]
+
+            // Notify if transitioned TO a waiting state from something else.
+            if session.status.isWaiting && previousType != currentType {
+                onNeedsAttention?(session)
+            }
+
+            previousStatusType[session.id] = currentType
+        }
+
+        // Clean up entries for sessions no longer detected.
+        let currentIDs = Set(newSessions.map(\.id))
+        previousStatusType = previousStatusType.filter { currentIDs.contains($0.key) }
     }
 }

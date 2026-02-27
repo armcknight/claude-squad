@@ -1,53 +1,101 @@
 import Foundation
 
-/// The operational state of a Claude session inside a tmux pane.
+/// The operational state of a Claude session.
 enum SessionStatus: Equatable {
-    /// Claude is actively thinking / generating output.
+    /// Claude is actively processing (generating output or executing a tool).
     case running
-    /// Claude has finished a turn and is waiting for the user to type.
-    case waitingForInput(since: Date)
+    /// Finished a turn, idle at the prompt.
+    case waitingIdle(since: Date)
+    /// Asked AskUserQuestion, awaiting a response.
+    case waitingForQuestion(since: Date, question: String?)
+    /// No running process; session file exists on disk.
+    case inactive(lastActivity: Date)
 
     var isWaiting: Bool {
-        if case .waitingForInput = self { return true }
-        return false
+        switch self {
+        case .waitingIdle, .waitingForQuestion: return true
+        default: return false
+        }
     }
 
-    /// Time the session has been idle (0 when running).
-    var waitingDuration: TimeInterval {
-        if case .waitingForInput(let since) = self {
-            return Date().timeIntervalSince(since)
+    var isActive: Bool {
+        switch self {
+        case .running, .waitingIdle, .waitingForQuestion: return true
+        case .inactive: return false
         }
-        return 0
+    }
+
+    /// Time the session has been waiting (0 when running or inactive).
+    var waitingDuration: TimeInterval {
+        switch self {
+        case .waitingIdle(let since), .waitingForQuestion(let since, _):
+            return Date().timeIntervalSince(since)
+        default:
+            return 0
+        }
+    }
+
+    /// Sort priority: lower = sorts first.
+    /// waitingForQuestion > waitingIdle > running > inactive
+    var sortPriority: Int {
+        switch self {
+        case .waitingForQuestion: return 0
+        case .waitingIdle: return 1
+        case .running: return 2
+        case .inactive: return 3
+        }
     }
 }
 
-/// A single Claude CLI session detected inside a tmux session.
+/// Summary of task/todo progress for a session.
+struct TaskSummary: Equatable {
+    let total: Int
+    let completed: Int
+    let inProgress: Int
+    let pending: Int
+}
+
+/// A single Claude CLI session detected from on-disk data and process inspection.
 struct ClaudeSession: Identifiable {
-    /// The tmux session name is used as the unique identifier.
+    /// The session UUID from the JSONL conversation log.
     let id: String
 
-    /// Human-readable label; same as `id` unless the user renames it.
-    var displayName: String { id }
+    /// Absolute path to the project directory.
+    let projectPath: String
 
-    /// Current state of the Claude process inside this tmux session.
+    /// Just the last path component of projectPath.
+    var projectName: String {
+        (projectPath as NSString).lastPathComponent
+    }
+
+    /// Current git branch, if detected.
+    var gitBranch: String?
+
+    /// The claude-squad slug (human-friendly short name), if available.
+    var slug: String?
+
+    /// Best display name: slug if available, otherwise projectName.
+    var displayName: String {
+        slug ?? projectName
+    }
+
+    /// Current state of the session.
     var status: SessionStatus
 
-    /// The TTY device path of the tmux pane (e.g. "/dev/ttys004").
-    /// Used to locate the matching iTerm2 window.
-    var paneTTY: String?
+    /// PID of the running claude process, if any.
+    var processPID: Int32?
+
+    /// Task progress summary, if tasks/todos exist.
+    var taskSummary: TaskSummary?
+
+    /// Modification time of the JSONL file.
+    var lastModified: Date
 
     // MARK: - Sorting
 
-    /// Sessions waiting for input sort above running sessions.
-    /// Among waiting sessions, the one that has waited *longest* sorts first.
+    /// Sort key: by status priority, then by waiting duration (longest first).
     var sortKey: (Int, Double) {
-        switch status {
-        case .waitingForInput:
-            // Negate so that longer waits come first (ascending sort).
-            return (0, -status.waitingDuration)
-        case .running:
-            return (1, 0)
-        }
+        (status.sortPriority, -status.waitingDuration)
     }
 }
 
