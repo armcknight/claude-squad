@@ -134,24 +134,26 @@ final class ClaudeSessionDetector {
         return pids
     }
 
-    /// Returns a map of PID → cwd for the given PIDs using `lsof`.
+    /// Returns a map of PID → cwd for the given PIDs using `proc_pidinfo`.
+    /// Unlike lsof, this uses a direct Darwin syscall that works under hardened runtime.
     func getProcessCWDs(pids: [Int32]) -> [Int32: String] {
         guard !pids.isEmpty else { return [:] }
-        var args = ["-a", "-d", "cwd", "-Fn"]
-        for pid in pids {
-            args += ["-p", String(pid)]
-        }
-        guard let output = try? runShell("/usr/bin/lsof", args: args) else {
-            Logger.warning("Failed to run lsof for PID cwd lookup")
-            return [:]
-        }
         var result: [Int32: String] = [:]
-        var currentPID: Int32?
-        for line in output.components(separatedBy: "\n") {
-            if line.hasPrefix("p"), let pid = Int32(line.dropFirst()) {
-                currentPID = pid
-            } else if line.hasPrefix("n"), let pid = currentPID {
-                result[pid] = String(line.dropFirst())
+        let infoSize = Int32(MemoryLayout<proc_vnodepathinfo>.size)
+        for pid in pids {
+            var vnodeInfo = proc_vnodepathinfo()
+            let ret = proc_pidinfo(pid, PROC_PIDVNODEPATHINFO, 0, &vnodeInfo, infoSize)
+            guard ret == infoSize else {
+                Logger.debug("proc_pidinfo failed for pid \(pid) (ret=\(ret))")
+                continue
+            }
+            let cwd = withUnsafePointer(to: &vnodeInfo.pvi_cdir.vip_path) {
+                $0.withMemoryRebound(to: CChar.self, capacity: Int(MAXPATHLEN)) {
+                    String(cString: $0)
+                }
+            }
+            if !cwd.isEmpty {
+                result[pid] = cwd
             }
         }
         return result
@@ -243,10 +245,25 @@ final class ClaudeSessionDetector {
         var status = determineStatus(tailLines: tailLines, lastModified: lastModified)
         Logger.debug("  JSONL-derived status: \(status)")
 
-        // If no matching process, override to inactive.
-        if matchingProcess == nil {
-            status = .inactive(lastActivity: lastModified)
-            Logger.debug("  Overridden to inactive (no process)")
+        if matchingProcess != nil {
+            // We have a running process. If JSONL analysis couldn't determine
+            // an active status (e.g. tail lines were unparseable), trust the
+            // process signal — the session is running.
+            if !status.isActive {
+                Logger.debug("  Process matched but JSONL says inactive — overriding to running")
+                status = .running
+            }
+        } else {
+            // No matching process. Use file recency as a secondary signal:
+            // if the file was modified very recently, something is writing to
+            // it, so trust the JSONL-derived status instead of forcing inactive.
+            let timeSinceModified = Date().timeIntervalSince(lastModified)
+            if timeSinceModified > 30 {
+                status = .inactive(lastActivity: lastModified)
+                Logger.debug("  Overridden to inactive (no process, file stale \(Int(timeSinceModified))s)")
+            } else {
+                Logger.debug("  No process but file recently modified (\(Int(timeSinceModified))s) — keeping JSONL status")
+            }
         }
 
         // Prefer git branch from JSONL metadata, fall back to .git/HEAD.
@@ -451,7 +468,7 @@ final class ClaudeSessionDetector {
            let blockType = lastBlock["type"] as? String,
            blockType == "tool_use" {
             let toolName = lastBlock["name"] as? String ?? ""
-            if toolName == "AskUserQuestion" || toolName == "TodoWrite" {
+            if toolName == "AskUserQuestion" || toolName == "TodoWrite" || toolName == "ExitPlanMode" {
                 let question = extractQuestion(from: lastBlock)
                 Logger.debug("    -> waitingForQuestion (tool=\(toolName), question=\(question ?? "nil"))")
                 return .waitingForQuestion(since: lastModified, question: question)
@@ -515,6 +532,17 @@ final class ClaudeSessionDetector {
 
         let sessionTasksDir = (tasksDir as NSString).appendingPathComponent(sessionId)
         readTasksFromDirectory(sessionTasksDir, sessionId: nil, total: &total, completed: &completed, inProgress: &inProgress, pending: &pending)
+
+        // When tasks are completed, Claude Code deletes the JSON files and writes
+        // a .highwatermark file containing the total task count. Account for
+        // cleaned-up tasks by reading the highwatermark.
+        let hwPath = (sessionTasksDir as NSString).appendingPathComponent(".highwatermark")
+        if let hwStr = try? String(contentsOfFile: hwPath, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines),
+           let hwTotal = Int(hwStr), hwTotal > total {
+            let cleanedUp = hwTotal - total
+            completed += cleanedUp
+            total = hwTotal
+        }
 
         guard total > 0 else { return nil }
         return TaskSummary(total: total, completed: completed, inProgress: inProgress, pending: pending)

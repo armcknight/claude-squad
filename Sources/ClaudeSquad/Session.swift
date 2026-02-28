@@ -74,9 +74,9 @@ struct ClaudeSession: Identifiable {
     /// The claude-squad slug (human-friendly short name), if available.
     var slug: String?
 
-    /// Best display name: slug if available, otherwise projectName.
+    /// Display name: the project directory path.
     var displayName: String {
-        slug ?? projectName
+        projectPath
     }
 
     /// Current state of the session.
@@ -107,6 +107,10 @@ extension ClaudeSession: Comparable {
 
     static func == (lhs: ClaudeSession, rhs: ClaudeSession) -> Bool {
         lhs.id == rhs.id
+            && lhs.status == rhs.status
+            && lhs.taskSummary == rhs.taskSummary
+            && lhs.processPID == rhs.processPID
+            && lhs.gitBranch == rhs.gitBranch
     }
 }
 

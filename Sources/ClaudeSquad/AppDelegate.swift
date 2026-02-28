@@ -39,13 +39,19 @@ import SwiftUI
     // MARK: - Window
 
     private func setupWindow() {
+        // Use a comfortable default size; setFrameAutosaveName will restore
+        // the user's last position/size on subsequent launches.
+        let screenFrame = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+        let width: CGFloat = min(960, screenFrame.width * 0.6)
+        let height: CGFloat = min(640, screenFrame.height * 0.7)
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 800, height: 500),
+            contentRect: NSRect(x: 0, y: 0, width: width, height: height),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
         )
         window.title = "Claude Squad"
+        window.contentMinSize = NSSize(width: 500, height: 300)
         window.contentViewController = NSHostingController(
             rootView: SessionListView(monitor: monitor)
         )
