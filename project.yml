@@ -1,5 +1,10 @@
 name: ClaudeSquad
 
+packages:
+  SwiftyBeaver:
+    url: https://github.com/SwiftyBeaver/SwiftyBeaver
+    version: 2.1.1
+
 options:
   bundleIdPrefix: com.armcknight
   xcodeVersion: 16.0
@@ -26,9 +31,11 @@ targets:
   ClaudeSquad:
     type: application
     platform: macOS
-    deploymentTarget: "13.0"
+    deploymentTarget: "14.0"
     sources:
       - Sources/ClaudeSquad
+    dependencies:
+      - package: SwiftyBeaver
     configFiles:
       Debug: config/ClaudeSquad.xcconfig
       Release: config/ClaudeSquad.xcconfig

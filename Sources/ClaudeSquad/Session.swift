@@ -109,3 +109,25 @@ extension ClaudeSession: Comparable {
         lhs.id == rhs.id
     }
 }
+
+extension ClaudeSession: Hashable {
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+    }
+}
+
+// MARK: - Duration formatting
+
+extension TimeInterval {
+    /// Formats a duration in seconds into a human-readable string (e.g. "3m 12s", "1h 5m").
+    var formattedDuration: String {
+        let seconds = Int(self)
+        if seconds < 60 { return "\(seconds)s" }
+        let minutes = seconds / 60
+        let remainingSeconds = seconds % 60
+        if minutes < 60 { return "\(minutes)m \(remainingSeconds)s" }
+        let hours = minutes / 60
+        let remainingMinutes = minutes % 60
+        return "\(hours)h \(remainingMinutes)m"
+    }
+}

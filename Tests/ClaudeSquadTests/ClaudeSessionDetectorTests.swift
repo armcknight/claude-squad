@@ -22,7 +22,6 @@ final class ClaudeSessionDetectorTests: XCTestCase {
     func test_readTailLinesFromLargeFile() throws {
         let tempDir = NSTemporaryDirectory()
         let path = (tempDir as NSString).appendingPathComponent("test_tail_large_\(UUID().uuidString).jsonl")
-        // Create a file larger than one chunk (8KB).
         let lines = (1...500).map { "{\"line\": \($0), \"padding\": \"\(String(repeating: "x", count: 100))\"}" }
         try lines.joined(separator: "\n").write(toFile: path, atomically: true, encoding: .utf8)
         defer { try? FileManager.default.removeItem(atPath: path) }
@@ -48,12 +47,12 @@ final class ClaudeSessionDetectorTests: XCTestCase {
         XCTAssertTrue(result.isEmpty)
     }
 
-    // MARK: - Status determination
+    // MARK: - Status determination (real JSONL format: type at top level, content inside message)
 
     func test_assistantTextMeansWaitingIdle() {
         let lastModified = Date()
         let lines = [
-            "{\"role\": \"assistant\", \"content\": [{\"type\": \"text\", \"text\": \"Done!\"}]}"
+            "{\"type\": \"assistant\", \"message\": {\"role\": \"assistant\", \"content\": [{\"type\": \"text\", \"text\": \"Done!\"}]}}"
         ]
         let status = detector.determineStatus(tailLines: lines, lastModified: lastModified)
         if case .waitingIdle = status {
@@ -67,7 +66,7 @@ final class ClaudeSessionDetectorTests: XCTestCase {
         let lastModified = Date()
         let lines = [
             """
-            {"role": "assistant", "content": [{"type": "tool_use", "name": "AskUserQuestion", "input": {"questions": [{"question": "Which approach?"}]}}]}
+            {"type": "assistant", "message": {"role": "assistant", "content": [{"type": "tool_use", "name": "AskUserQuestion", "input": {"questions": [{"question": "Which approach?"}]}}]}}
             """
         ]
         let status = detector.determineStatus(tailLines: lines, lastModified: lastModified)
@@ -81,8 +80,8 @@ final class ClaudeSessionDetectorTests: XCTestCase {
     func test_userMessageMeansRunning() {
         let lastModified = Date()
         let lines = [
-            "{\"role\": \"assistant\", \"content\": [{\"type\": \"text\", \"text\": \"Ok\"}]}",
-            "{\"role\": \"user\", \"content\": \"do it\"}"
+            "{\"type\": \"assistant\", \"message\": {\"role\": \"assistant\", \"content\": [{\"type\": \"text\", \"text\": \"Ok\"}]}}",
+            "{\"type\": \"user\", \"message\": {\"role\": \"user\", \"content\": \"do it\"}}"
         ]
         let status = detector.determineStatus(tailLines: lines, lastModified: lastModified)
         if case .running = status {
@@ -95,7 +94,7 @@ final class ClaudeSessionDetectorTests: XCTestCase {
     func test_otherToolUseMeansRunning() {
         let lastModified = Date()
         let lines = [
-            "{\"role\": \"assistant\", \"content\": [{\"type\": \"tool_use\", \"name\": \"Bash\", \"input\": {}}]}"
+            "{\"type\": \"assistant\", \"message\": {\"role\": \"assistant\", \"content\": [{\"type\": \"tool_use\", \"name\": \"Bash\", \"input\": {}}]}}"
         ]
         let status = detector.determineStatus(tailLines: lines, lastModified: lastModified)
         if case .running = status {
@@ -115,26 +114,100 @@ final class ClaudeSessionDetectorTests: XCTestCase {
         }
     }
 
-    // MARK: - First line parsing
-
-    func test_parseFirstLineWithCwdAndSessionId() {
-        let line = "{\"cwd\": \"/Users/test/project\", \"sessionId\": \"abc-123\"}"
-        let info = detector.parseFirstLine(line)
-        XCTAssertEqual(info?.cwd, "/Users/test/project")
-        XCTAssertEqual(info?.sessionId, "abc-123")
+    func test_fileHistorySnapshotIsSkipped() {
+        let lastModified = Date()
+        let lines = [
+            "{\"type\": \"file-history-snapshot\", \"messageId\": \"abc\"}",
+            "{\"type\": \"assistant\", \"message\": {\"role\": \"assistant\", \"content\": [{\"type\": \"text\", \"text\": \"Done!\"}]}}"
+        ]
+        let status = detector.determineStatus(tailLines: lines, lastModified: lastModified)
+        if case .waitingIdle = status {
+            // pass — skipped the snapshot, found the assistant text
+        } else {
+            XCTFail("Expected waitingIdle, got \(status)")
+        }
     }
 
-    func test_parseFirstLineWithNestedMessage() {
-        let line = "{\"message\": {\"cwd\": \"/Users/test/project\"}, \"session_id\": \"def-456\"}"
-        let info = detector.parseFirstLine(line)
+    func test_userMessageWithToolResultMeansRunning() {
+        let lastModified = Date()
+        let lines = [
+            "{\"type\": \"assistant\", \"message\": {\"role\": \"assistant\", \"content\": [{\"type\": \"tool_use\", \"name\": \"Bash\"}]}}",
+            "{\"type\": \"user\", \"message\": {\"role\": \"user\", \"content\": [{\"type\": \"tool_result\", \"content\": \"output\"}]}}"
+        ]
+        let status = detector.determineStatus(tailLines: lines, lastModified: lastModified)
+        if case .running = status {
+            // pass — tool_result in a user message means Claude is processing
+        } else {
+            XCTFail("Expected running, got \(status)")
+        }
+    }
+
+    // MARK: - Session metadata parsing
+
+    func test_parseSessionMetadataWithAllFields() {
+        let line = "{\"type\": \"user\", \"cwd\": \"/Users/test/project\", \"sessionId\": \"abc-123\", \"gitBranch\": \"main\", \"slug\": \"cool-slug\"}"
+        let info = detector.parseSessionMetadata(line)
+        XCTAssertEqual(info?.cwd, "/Users/test/project")
+        XCTAssertEqual(info?.sessionId, "abc-123")
+        XCTAssertEqual(info?.gitBranch, "main")
+        XCTAssertEqual(info?.slug, "cool-slug")
+    }
+
+    func test_parseSessionMetadataWithSessionIdUnderscore() {
+        let line = "{\"type\": \"assistant\", \"cwd\": \"/Users/test/project\", \"session_id\": \"def-456\"}"
+        let info = detector.parseSessionMetadata(line)
         XCTAssertEqual(info?.cwd, "/Users/test/project")
         XCTAssertEqual(info?.sessionId, "def-456")
     }
 
-    func test_parseFirstLineWithoutCwdReturnsNil() {
-        let line = "{\"sessionId\": \"abc-123\"}"
-        let info = detector.parseFirstLine(line)
+    func test_parseSessionMetadataSkipsFileHistorySnapshot() {
+        let line = "{\"type\": \"file-history-snapshot\", \"messageId\": \"abc\"}"
+        let info = detector.parseSessionMetadata(line)
         XCTAssertNil(info)
+    }
+
+    func test_parseSessionMetadataSkipsProgress() {
+        let line = "{\"type\": \"progress\", \"data\": {}}"
+        let info = detector.parseSessionMetadata(line)
+        XCTAssertNil(info)
+    }
+
+    func test_parseSessionMetadataSkipsSystem() {
+        let line = "{\"type\": \"system\", \"data\": {}}"
+        let info = detector.parseSessionMetadata(line)
+        XCTAssertNil(info)
+    }
+
+    func test_parseSessionMetadataWithoutCwdReturnsNil() {
+        let line = "{\"type\": \"user\", \"sessionId\": \"abc-123\"}"
+        let info = detector.parseSessionMetadata(line)
+        XCTAssertNil(info)
+    }
+
+    func test_parseSessionMetadataWithoutSessionIdReturnsNil() {
+        let line = "{\"type\": \"user\", \"cwd\": \"/Users/test/project\"}"
+        let info = detector.parseSessionMetadata(line)
+        XCTAssertNil(info)
+    }
+
+    // MARK: - readFirstLineInfo with real JSONL structure
+
+    func test_readFirstLineInfoSkipsSnapshotLine() throws {
+        let tempDir = NSTemporaryDirectory()
+        let path = (tempDir as NSString).appendingPathComponent("test_meta_\(UUID().uuidString).jsonl")
+        let lines = [
+            "{\"type\": \"file-history-snapshot\", \"messageId\": \"abc\"}",
+            "{\"type\": \"user\", \"cwd\": \"/Users/test/project\", \"sessionId\": \"abc-123\", \"gitBranch\": \"main\", \"slug\": \"my-slug\", \"message\": {\"role\": \"user\", \"content\": \"hello\"}}"
+        ]
+        try lines.joined(separator: "\n").write(toFile: path, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(atPath: path) }
+
+        let info = detector.readFirstLineInfo(jsonlPath: path)
+        XCTAssertNotNil(info)
+        XCTAssertEqual(info?.cwd, "/Users/test/project")
+        XCTAssertEqual(info?.sessionId, "abc-123")
+        XCTAssertEqual(info?.gitBranch, "main")
+        XCTAssertEqual(info?.slug, "my-slug")
     }
 
     // MARK: - Question extraction

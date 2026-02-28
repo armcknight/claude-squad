@@ -7,8 +7,10 @@ enum TerminalLauncher {
     /// Opens the preferred terminal application at the given directory path.
     static func open(at directoryPath: String) {
         if isITermInstalled() {
+            Logger.debug("Launching iTerm2 at \(directoryPath)")
             openITerm(at: directoryPath)
         } else {
+            Logger.debug("Launching Terminal.app at \(directoryPath)")
             openTerminalApp(at: directoryPath)
         }
     }
@@ -57,8 +59,13 @@ enum TerminalLauncher {
         var error: NSDictionary?
         if let scriptObj = NSAppleScript(source: script) {
             scriptObj.executeAndReturnError(&error)
-            return error == nil
+            if let error = error {
+                Logger.error("AppleScript execution failed: \(error)")
+                return false
+            }
+            return true
         }
+        Logger.error("Failed to create NSAppleScript")
         return false
     }
 }

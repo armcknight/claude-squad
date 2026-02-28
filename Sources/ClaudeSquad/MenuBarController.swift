@@ -13,6 +13,9 @@ final class MenuBarController {
     /// Tracks which sessions we've already sent notifications for (to avoid duplicates).
     private var notifiedStates: [String: Int] = [:]
 
+    /// Callback to show the main application window.
+    var onShowWindow: (() -> Void)?
+
     init(monitor: SessionMonitor) {
         self.monitor = monitor
         setupStatusItem()
@@ -32,7 +35,13 @@ final class MenuBarController {
     }
 
     private func setupNotifications() {
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { granted, error in
+            if let error = error {
+                Logger.error("Notification authorization failed: \(error.localizedDescription)")
+            } else {
+                Logger.debug("Notification authorization granted: \(granted)")
+            }
+        }
         monitor.onNeedsAttention = { [weak self] session in
             self?.postNotification(for: session)
         }
@@ -92,12 +101,14 @@ final class MenuBarController {
             content: content,
             trigger: nil
         )
+        Logger.info("Posting notification for \(session.displayName): \(content.title)")
         UNUserNotificationCenter.current().add(request)
     }
 
     // MARK: - Menu construction
 
     private func rebuildMenu(sessions: [ClaudeSession]) {
+        Logger.debug("Rebuilding menu with \(sessions.count) session(s)")
         let menu = NSMenu()
 
         if sessions.isEmpty {
@@ -106,9 +117,16 @@ final class MenuBarController {
             menu.addItem(empty)
         } else {
             for session in sessions {
+                Logger.debug("  Menu item: \(session.displayName) [\(session.status)]")
                 menu.addItem(menuItem(for: session))
             }
         }
+
+        menu.addItem(.separator())
+
+        let showWindow = NSMenuItem(title: "Show Window", action: #selector(handleShowWindow), keyEquivalent: "w")
+        showWindow.target = self
+        menu.addItem(showWindow)
 
         menu.addItem(.separator())
 
@@ -176,11 +194,11 @@ final class MenuBarController {
         case .running:
             return "⚡ \(name) — running"
         case .waitingForQuestion(let since, _):
-            return "❓ \(name) — question (\(formatDuration(Date().timeIntervalSince(since))))"
+            return "❓ \(name) — question (\(Date().timeIntervalSince(since).formattedDuration))"
         case .waitingIdle(let since):
-            return "⏳ \(name) — idle (\(formatDuration(Date().timeIntervalSince(since))))"
+            return "⏳ \(name) — idle (\(Date().timeIntervalSince(since).formattedDuration))"
         case .inactive(let lastActivity):
-            return "⏸ \(name) — inactive (\(formatDuration(Date().timeIntervalSince(lastActivity))) ago)"
+            return "⏸ \(name) — inactive (\(Date().timeIntervalSince(lastActivity).formattedDuration) ago)"
         }
     }
 
@@ -189,11 +207,13 @@ final class MenuBarController {
     @objc private func handleSessionClick(_ sender: NSMenuItem) {
         guard let sessionID = sender.representedObject as? String,
               let session = monitor.sessions.first(where: { $0.id == sessionID }) else { return }
+        Logger.debug("Opening terminal for session \(session.displayName) at \(session.projectPath)")
         TerminalLauncher.open(at: session.projectPath)
     }
 
     @objc private func handleOpenTerminal(_ sender: NSMenuItem) {
         guard let path = sender.representedObject as? String else { return }
+        Logger.debug("Opening terminal at \(path)")
         TerminalLauncher.open(at: path)
     }
 
@@ -201,16 +221,7 @@ final class MenuBarController {
         monitor.refresh()
     }
 
-    // MARK: - Helpers
-
-    private func formatDuration(_ interval: TimeInterval) -> String {
-        let seconds = Int(interval)
-        if seconds < 60 { return "\(seconds)s" }
-        let minutes = seconds / 60
-        let remainingSeconds = seconds % 60
-        if minutes < 60 { return "\(minutes)m \(remainingSeconds)s" }
-        let hours = minutes / 60
-        let remainingMinutes = minutes % 60
-        return "\(hours)h \(remainingMinutes)m"
+    @objc private func handleShowWindow() {
+        onShowWindow?()
     }
 }

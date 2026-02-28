@@ -32,6 +32,7 @@ final class SessionMonitor: ObservableObject {
     // MARK: - Lifecycle
 
     func start() {
+        Logger.info("SessionMonitor starting with \(refreshInterval)s interval")
         refresh()
         timer = Timer.scheduledTimer(withTimeInterval: refreshInterval, repeats: true) { [weak self] _ in
             self?.refresh()
@@ -39,6 +40,7 @@ final class SessionMonitor: ObservableObject {
     }
 
     func stop() {
+        Logger.info("SessionMonitor stopping")
         timer?.invalidate()
         timer = nil
     }
@@ -46,18 +48,30 @@ final class SessionMonitor: ObservableObject {
     // MARK: - Refresh
 
     func refresh() {
+        Logger.info("SessionMonitor.refresh() called, dispatching to background")
         DispatchQueue.global(qos: .utility).async { [weak self] in
-            guard let self else { return }
+            guard let self else {
+                Logger.warning("SessionMonitor.refresh(): self was deallocated")
+                return
+            }
+            Logger.info("SessionMonitor.refresh(): background block executing")
             do {
                 let detected = try self.detector.detectSessions()
+                Logger.info("Detector returned \(detected.count) session(s)")
                 let stabilized = self.stabilizeTimestamps(detected)
                 let sorted = stabilized.sorted()
                 DispatchQueue.main.async {
+                    let oldCount = self.sessions.count
                     self.checkTransitions(newSessions: sorted)
                     self.sessions = sorted
                     self.lastError = nil
+                    if sorted.count != oldCount {
+                        Logger.info("Session count changed: \(oldCount) -> \(sorted.count)")
+                    }
                 }
             } catch {
+                Logger.error("Session detection failed: \(error)")
+                Logger.error("Session detection error details: \(String(describing: error))")
                 DispatchQueue.main.async {
                     self.lastError = error.localizedDescription
                 }
@@ -105,6 +119,7 @@ final class SessionMonitor: ObservableObject {
 
             // Notify if transitioned TO a waiting state from something else.
             if session.status.isWaiting && previousType != currentType {
+                Logger.info("Session \(session.displayName) transitioned to waiting (priority \(currentType))")
                 onNeedsAttention?(session)
             }
 
