@@ -8,6 +8,8 @@ enum SessionStatus: Equatable {
     case waitingIdle(since: Date)
     /// Asked AskUserQuestion, awaiting a response.
     case waitingForQuestion(since: Date, question: String?)
+    /// Process was killed mid-work (user hit Esc / Ctrl-C).
+    case interrupted(lastActivity: Date)
     /// No running process; session file exists on disk.
     case inactive(lastActivity: Date)
 
@@ -21,7 +23,7 @@ enum SessionStatus: Equatable {
     var isActive: Bool {
         switch self {
         case .running, .waitingIdle, .waitingForQuestion: return true
-        case .inactive: return false
+        case .interrupted, .inactive: return false
         }
     }
 
@@ -35,14 +37,49 @@ enum SessionStatus: Equatable {
         }
     }
 
+    /// Section title for grouping in the UI.
+    var sectionTitle: String {
+        switch self {
+        case .waitingForQuestion: return "Needs Input"
+        case .waitingIdle: return "Idle"
+        case .running: return "Running"
+        case .interrupted: return "Interrupted"
+        case .inactive: return "Inactive"
+        }
+    }
+
+    /// SF Symbol name for this status.
+    var iconName: String {
+        switch self {
+        case .running: return "bolt.circle.fill"
+        case .waitingForQuestion: return "questionmark.circle.fill"
+        case .waitingIdle: return "pause.circle.fill"
+        case .interrupted: return "exclamationmark.octagon.fill"
+        case .inactive: return "moon.circle.fill"
+        }
+    }
+
+
+    /// Time since the status started, for display.
+    var elapsed: TimeInterval {
+        switch self {
+        case .running: return 0
+        case .waitingIdle(let since), .waitingForQuestion(let since, _):
+            return Date().timeIntervalSince(since)
+        case .interrupted(let d), .inactive(let d):
+            return Date().timeIntervalSince(d)
+        }
+    }
+
     /// Sort priority: lower = sorts first.
-    /// waitingForQuestion > waitingIdle > running > inactive
+    /// waitingForQuestion > waitingIdle > running > interrupted > inactive
     var sortPriority: Int {
         switch self {
         case .waitingForQuestion: return 0
         case .waitingIdle: return 1
         case .running: return 2
-        case .inactive: return 3
+        case .interrupted: return 3
+        case .inactive: return 4
         }
     }
 }
@@ -74,9 +111,10 @@ struct ClaudeSession: Identifiable {
     /// The claude-squad slug (human-friendly short name), if available.
     var slug: String?
 
-    /// Display name: the project directory path.
+    /// Abbreviated path: `~/C/o/g/r/p/project-name`
+    /// First letter of each intermediate directory, full last component.
     var displayName: String {
-        projectPath
+        abbreviatePath(projectPath)
     }
 
     /// Current state of the session.
@@ -118,6 +156,30 @@ extension ClaudeSession: Hashable {
     func hash(into hasher: inout Hasher) {
         hasher.combine(id)
     }
+}
+
+// MARK: - Path abbreviation
+
+/// Abbreviates an absolute path: first letter of each intermediate directory,
+/// full last component. Home directory becomes `~`.
+/// e.g. `/Users/me/Code/org/repos/project` → `~/C/o/r/project`
+func abbreviatePath(_ path: String) -> String {
+    var components = (path as NSString).pathComponents
+    // Replace /Users/<username> with ~
+    let home = NSHomeDirectory()
+    if path.hasPrefix(home) {
+        let homeComponents = (home as NSString).pathComponents
+        components = Array(components.dropFirst(homeComponents.count))
+        components.insert("~", at: 0)
+    }
+    guard components.count > 2 else { return path }
+    let last = components.removeLast()
+    let abbreviated = components.map { component in
+        if component == "~" || component == "/" { return component }
+        return String(component.prefix(1))
+    }
+    return abbreviated.joined(separator: "/")
+        .replacingOccurrences(of: "//", with: "/") + "/" + last
 }
 
 // MARK: - Duration formatting

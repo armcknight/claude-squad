@@ -259,8 +259,17 @@ final class ClaudeSessionDetector {
             // it, so trust the JSONL-derived status instead of forcing inactive.
             let timeSinceModified = Date().timeIntervalSince(lastModified)
             if timeSinceModified > 30 {
-                status = .inactive(lastActivity: lastModified)
-                Logger.debug("  Overridden to inactive (no process, file stale \(Int(timeSinceModified))s)")
+                // File is stale and process is gone. If JSONL says the session
+                // was mid-work (running or asking a question), it was interrupted
+                // (user hit Esc/Ctrl-C). If it was idle, mark inactive.
+                switch status {
+                case .running, .waitingForQuestion:
+                    status = .interrupted(lastActivity: lastModified)
+                    Logger.debug("  Overridden to interrupted (no process, was \(status), file stale \(Int(timeSinceModified))s)")
+                default:
+                    status = .inactive(lastActivity: lastModified)
+                    Logger.debug("  Overridden to inactive (no process, file stale \(Int(timeSinceModified))s)")
+                }
             } else {
                 Logger.debug("  No process but file recently modified (\(Int(timeSinceModified))s) — keeping JSONL status")
             }

@@ -16,6 +16,7 @@ final class SessionTests: XCTestCase {
         XCTAssertTrue(SessionStatus.running.isActive)
         XCTAssertTrue(SessionStatus.waitingIdle(since: Date()).isActive)
         XCTAssertTrue(SessionStatus.waitingForQuestion(since: Date(), question: nil).isActive)
+        XCTAssertFalse(SessionStatus.interrupted(lastActivity: Date()).isActive)
         XCTAssertFalse(SessionStatus.inactive(lastActivity: Date()).isActive)
     }
 
@@ -36,7 +37,8 @@ final class SessionTests: XCTestCase {
         XCTAssertEqual(SessionStatus.waitingForQuestion(since: Date(), question: nil).sortPriority, 0)
         XCTAssertEqual(SessionStatus.waitingIdle(since: Date()).sortPriority, 1)
         XCTAssertEqual(SessionStatus.running.sortPriority, 2)
-        XCTAssertEqual(SessionStatus.inactive(lastActivity: Date()).sortPriority, 3)
+        XCTAssertEqual(SessionStatus.interrupted(lastActivity: Date()).sortPriority, 3)
+        XCTAssertEqual(SessionStatus.inactive(lastActivity: Date()).sortPriority, 4)
     }
 
     // MARK: - ClaudeSession sorting
@@ -45,10 +47,11 @@ final class SessionTests: XCTestCase {
         let question = makeSession(id: "a", status: .waitingForQuestion(since: Date(), question: nil))
         let idle = makeSession(id: "b", status: .waitingIdle(since: Date()))
         let running = makeSession(id: "c", status: .running)
-        let inactive = makeSession(id: "d", status: .inactive(lastActivity: Date()))
+        let interrupted = makeSession(id: "d", status: .interrupted(lastActivity: Date()))
+        let inactive = makeSession(id: "e", status: .inactive(lastActivity: Date()))
 
-        let sorted = [inactive, running, idle, question].sorted()
-        XCTAssertEqual(sorted.map(\.id), ["a", "b", "c", "d"])
+        let sorted = [inactive, running, interrupted, idle, question].sorted()
+        XCTAssertEqual(sorted.map(\.id), ["a", "b", "c", "d", "e"])
     }
 
     func test_longerWaitSortsFirst() {
@@ -58,15 +61,17 @@ final class SessionTests: XCTestCase {
         XCTAssertEqual(sorted.map(\.id), ["a", "b"])
     }
 
-    func test_displayNameUsesSlugWhenAvailable() {
-        var session = makeSession(id: "x", status: .running)
-        session.slug = "my-feature"
-        XCTAssertEqual(session.displayName, "my-feature")
+    func test_displayNameAbbreviatesPath() {
+        let session = makeSession(id: "x", status: .running)
+        // /Users/test/test-project → abbreviated with first letters
+        XCTAssertTrue(session.displayName.hasSuffix("test-project"))
+        XCTAssertTrue(session.displayName.count < session.projectPath.count)
     }
 
-    func test_displayNameFallsBackToProjectName() {
-        let session = makeSession(id: "x", status: .running)
-        XCTAssertEqual(session.displayName, "test-project")
+    func test_abbreviatePath() {
+        let home = NSHomeDirectory()
+        XCTAssertEqual(abbreviatePath("\(home)/Code/org/repos/my-project"), "~/C/o/r/my-project")
+        XCTAssertEqual(abbreviatePath("/tmp/foo"), "/t/foo")
     }
 
     func test_projectName() {

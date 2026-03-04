@@ -9,9 +9,9 @@ struct SessionDetailView: View {
             VStack(alignment: .leading, spacing: 16) {
                 // Header
                 HStack(spacing: 12) {
-                    Image(systemName: statusIconName)
+                    Image(systemName: session.status.iconName)
                         .font(.largeTitle)
-                        .foregroundStyle(statusColor)
+                        .foregroundStyle(session.status.color)
 
                     VStack(alignment: .leading) {
                         Text(session.displayName)
@@ -103,34 +103,12 @@ struct SessionDetailView: View {
 
     // MARK: - Status display
 
-    private var statusIconName: String {
-        switch session.status {
-        case .running: return "bolt.circle.fill"
-        case .waitingForQuestion: return "questionmark.circle.fill"
-        case .waitingIdle: return "pause.circle.fill"
-        case .inactive: return "moon.circle.fill"
-        }
-    }
-
-    private var statusColor: Color {
-        switch session.status {
-        case .running: return .blue
-        case .waitingForQuestion: return .orange
-        case .waitingIdle: return .yellow
-        case .inactive: return .gray
-        }
-    }
-
     private var statusText: String {
-        switch session.status {
-        case .running:
-            return "Running"
-        case .waitingForQuestion(let since, _):
-            return "Waiting for input (\(Date().timeIntervalSince(since).formattedDuration))"
-        case .waitingIdle(let since):
-            return "Idle (\(Date().timeIntervalSince(since).formattedDuration))"
-        case .inactive(let lastActivity):
-            return "Inactive (\(Date().timeIntervalSince(lastActivity).formattedDuration) ago)"
+        let title = session.status.sectionTitle
+        let elapsed = session.status.elapsed
+        if elapsed > 0 {
+            return "\(title) (\(elapsed.formattedDuration))"
         }
+        return title
     }
 }
