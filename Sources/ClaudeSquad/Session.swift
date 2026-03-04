@@ -92,6 +92,30 @@ struct TaskSummary: Equatable {
     let pending: Int
 }
 
+/// A single task item with its full content.
+struct TaskItem: Identifiable, Equatable {
+    let id: String
+    let subject: String
+    let description: String?
+    let status: String
+    let activeForm: String?
+}
+
+/// A single message in the conversation transcript.
+struct TranscriptMessage: Identifiable, Equatable {
+    let id: String  // uuid from JSONL
+    let role: String // "user" or "assistant"
+    let text: String
+    let timestamp: Date?
+    let toolCalls: [ToolCallSummary]
+}
+
+/// Brief summary of a tool call for display in the transcript.
+struct ToolCallSummary: Equatable {
+    let name: String
+    let summary: String?
+}
+
 /// A single Claude CLI session detected from on-disk data and process inspection.
 struct ClaudeSession: Identifiable {
     /// The session UUID from the JSONL conversation log.
@@ -125,6 +149,18 @@ struct ClaudeSession: Identifiable {
 
     /// Task progress summary, if tasks/todos exist.
     var taskSummary: TaskSummary?
+
+    /// Full task items with text content.
+    var taskItems: [TaskItem] = []
+
+    /// Conversation transcript messages.
+    var transcript: [TranscriptMessage] = []
+
+    /// GitHub PR URL, if detected in the conversation.
+    var pullRequestURL: String?
+
+    /// Path to the JSONL file (for lazy loading).
+    var jsonlPath: String?
 
     /// Modification time of the JSONL file.
     var lastModified: Date

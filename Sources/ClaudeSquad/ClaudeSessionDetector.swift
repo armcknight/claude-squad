@@ -248,8 +248,12 @@ final class ClaudeSessionDetector {
         if matchingProcess != nil {
             // We have a running process. If JSONL analysis couldn't determine
             // an active status (e.g. tail lines were unparseable), trust the
-            // process signal — the session is running.
-            if !status.isActive {
+            // process signal — the session is running. But if JSONL explicitly
+            // detected an interruption (user hit Esc), trust that over the
+            // process match (which may be a stale tmux launcher shell).
+            if case .interrupted = status {
+                Logger.debug("  Process matched but JSONL says interrupted — trusting JSONL")
+            } else if !status.isActive {
                 Logger.debug("  Process matched but JSONL says inactive — overriding to running")
                 status = .running
             }
@@ -281,7 +285,13 @@ final class ClaudeSessionDetector {
         // Read task summary.
         let taskSummary = readTaskSummary(sessionId: sessionId, claudeDir: claudeDir)
 
-        let session = ClaudeSession(
+        // Read full task items.
+        let taskItems = readTaskItems(sessionId: sessionId, claudeDir: claudeDir)
+
+        // Find PR URL.
+        let prURL = findPullRequestURL(jsonlPath: jsonlPath)
+
+        var session = ClaudeSession(
             id: sessionId,
             projectPath: cwd,
             gitBranch: gitBranch,
@@ -291,6 +301,9 @@ final class ClaudeSessionDetector {
             taskSummary: taskSummary,
             lastModified: lastModified
         )
+        session.taskItems = taskItems
+        session.pullRequestURL = prURL
+        session.jsonlPath = jsonlPath
         Logger.debug("  -> \(session.displayName) [\(status)]")
         return session
     }
@@ -426,6 +439,10 @@ final class ClaudeSessionDetector {
 
     /// Determines session status from the tail lines of the JSONL conversation log.
     func determineStatus(tailLines: [String], lastModified: Date) -> SessionStatus {
+        // Check if the most recent message entry is an assistant tool_use with no
+        // following tool_result. If so, the tool is pending user approval.
+        let hasToolResultAfterLastAssistant = checkForToolResultAfterLastAssistant(tailLines: tailLines)
+
         for line in tailLines.reversed() {
             guard let data = line.data(using: .utf8),
                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
@@ -439,11 +456,39 @@ final class ClaudeSessionDetector {
 
             // Assistant message — analyze content blocks to determine waiting vs running.
             if type == "assistant" || messageRole == "assistant" {
-                return analyzeAssistantMessage(json: json, lastModified: lastModified)
+                return analyzeAssistantMessage(json: json, lastModified: lastModified, toolResultFollows: hasToolResultAfterLastAssistant)
             }
 
-            // User message (including tool_result content) → Claude should be processing.
+            // User message — check if it's an interruption or a normal message.
             if type == "user" || messageRole == "user" {
+                // Check for user interruption patterns.
+                if let message = json["message"] as? [String: Any] {
+                    if let contentStr = message["content"] as? String,
+                       contentStr.contains("[Request interrupted by user") {
+                        Logger.debug("    -> interrupted (user interruption text)")
+                        return .interrupted(lastActivity: lastModified)
+                    }
+                    if let contentArray = message["content"] as? [[String: Any]] {
+                        // Check for rejected tool_result or interruption text
+                        for block in contentArray {
+                            if let blockType = block["type"] as? String {
+                                if blockType == "text",
+                                   let text = block["text"] as? String,
+                                   text.contains("[Request interrupted by user") {
+                                    Logger.debug("    -> interrupted (user interruption text in content block)")
+                                    return .interrupted(lastActivity: lastModified)
+                                }
+                                if blockType == "tool_result",
+                                   let content = block["content"] as? String,
+                                   content.contains("user doesn't want to proceed") {
+                                    Logger.debug("    -> interrupted (rejected tool use)")
+                                    return .interrupted(lastActivity: lastModified)
+                                }
+                            }
+                        }
+                    }
+                }
+                // Normal user message → Claude should be processing.
                 return .running
             }
 
@@ -453,8 +498,43 @@ final class ClaudeSessionDetector {
         return .inactive(lastActivity: lastModified)
     }
 
+    /// Checks whether the last assistant message in the tail lines is followed by a
+    /// user tool_result. If not, the assistant's tool_use is still pending approval.
+    private func checkForToolResultAfterLastAssistant(tailLines: [String]) -> Bool {
+        // Walk from the end. Once we hit an assistant message, check if any user
+        // tool_result appeared between it and the end of the file.
+        var sawUserToolResult = false
+        for line in tailLines.reversed() {
+            guard let data = line.data(using: .utf8),
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                continue
+            }
+            let type = json["type"] as? String
+            let messageRole = (json["message"] as? [String: Any])?["role"] as? String
+
+            if type == "assistant" || messageRole == "assistant" {
+                return sawUserToolResult
+            }
+            if type == "user" || messageRole == "user" {
+                // Check if this user message contains a tool_result
+                if let message = json["message"] as? [String: Any] {
+                    if let contentArray = message["content"] as? [[String: Any]] {
+                        for block in contentArray {
+                            if (block["type"] as? String) == "tool_result" {
+                                sawUserToolResult = true
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return sawUserToolResult
+    }
+
     /// Analyzes an assistant message to determine if it's waiting or still working.
-    func analyzeAssistantMessage(json: [String: Any], lastModified: Date) -> SessionStatus {
+    /// `toolResultFollows` indicates whether a user tool_result appears after this
+    /// assistant message in the JSONL. If false, the tool_use is pending approval.
+    func analyzeAssistantMessage(json: [String: Any], lastModified: Date, toolResultFollows: Bool = true) -> SessionStatus {
         // Content blocks are nested inside `message.content`.
         let content: [[String: Any]]
         if let message = json["message"] as? [String: Any],
@@ -481,6 +561,15 @@ final class ClaudeSessionDetector {
                 let question = extractQuestion(from: lastBlock)
                 Logger.debug("    -> waitingForQuestion (tool=\(toolName), question=\(question ?? "nil"))")
                 return .waitingForQuestion(since: lastModified, question: question)
+            }
+            // If no tool_result follows this assistant tool_use AND the file is
+            // stale (>3s), the tool is pending user approval — treat as needs input.
+            if !toolResultFollows {
+                let staleness = Date().timeIntervalSince(lastModified)
+                if staleness > 3 {
+                    Logger.debug("    -> waitingForQuestion (tool_use \(toolName) pending approval, file stale \(Int(staleness))s)")
+                    return .waitingForQuestion(since: lastModified, question: "Approve \(toolName) tool use?")
+                }
             }
             Logger.debug("    -> running (tool_use: \(toolName))")
             return .running
@@ -588,6 +677,211 @@ final class ClaudeSessionDetector {
                 }
             }
         }
+    }
+
+    // MARK: - Task items reading
+
+    /// Reads full task items (with text content) for a session.
+    func readTaskItems(sessionId: String, claudeDir: String) -> [TaskItem] {
+        let tasksDir = (claudeDir as NSString).appendingPathComponent("tasks")
+        let sessionTasksDir = (tasksDir as NSString).appendingPathComponent(sessionId)
+        let todosDir = (claudeDir as NSString).appendingPathComponent("todos")
+        let fm = FileManager.default
+        var items: [TaskItem] = []
+
+        // Read from tasks/<sessionId>/*.json
+        if let files = try? fm.contentsOfDirectory(atPath: sessionTasksDir) {
+            for file in files.sorted() where file.hasSuffix(".json") {
+                let path = (sessionTasksDir as NSString).appendingPathComponent(file)
+                if let item = parseTaskFile(path: path) {
+                    items.append(item)
+                }
+            }
+        }
+
+        // Read from todos/<sessionId>-*.json
+        if let files = try? fm.contentsOfDirectory(atPath: todosDir) {
+            for file in files.sorted() where file.hasSuffix(".json") && file.hasPrefix(sessionId) {
+                let path = (todosDir as NSString).appendingPathComponent(file)
+                if let data = fm.contents(atPath: path),
+                   let json = try? JSONSerialization.jsonObject(with: data) {
+                    if let tasks = json as? [[String: Any]] {
+                        for task in tasks {
+                            if let item = parseTaskJSON(task) { items.append(item) }
+                        }
+                    } else if let task = json as? [String: Any] {
+                        if let item = parseTaskJSON(task) { items.append(item) }
+                    }
+                }
+            }
+        }
+
+        return items
+    }
+
+    private func parseTaskFile(path: String) -> TaskItem? {
+        guard let data = FileManager.default.contents(atPath: path),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        return parseTaskJSON(json)
+    }
+
+    private func parseTaskJSON(_ json: [String: Any]) -> TaskItem? {
+        guard let subject = json["subject"] as? String else { return nil }
+        let id = (json["id"] as? String) ?? UUID().uuidString
+        let description = json["description"] as? String
+        let status = (json["status"] as? String) ?? "pending"
+        let activeForm = json["activeForm"] as? String
+        return TaskItem(id: id, subject: subject, description: description, status: status, activeForm: activeForm)
+    }
+
+    // MARK: - Transcript reading
+
+    /// How many tail lines to read for the transcript.
+    /// We read more lines than we display because many are progress/system lines that get filtered.
+    private let transcriptTailLineCount = 200
+
+    /// Reads the most recent conversation messages from a JSONL file using tail reading.
+    func readTranscript(jsonlPath: String) -> [TranscriptMessage] {
+        let tailLines = readTailLines(filePath: jsonlPath, lineCount: transcriptTailLineCount)
+        if tailLines.isEmpty {
+            Logger.debug("readTranscript: no tail lines from \(jsonlPath)")
+            return []
+        }
+
+        var messages: [TranscriptMessage] = []
+
+        for line in tailLines {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty { continue }
+
+            guard let lineData = trimmed.data(using: .utf8),
+                  let json = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any] else {
+                continue
+            }
+
+            let type = json["type"] as? String
+            // Skip non-message types
+            if type == "file-history-snapshot" || type == "progress" || type == "system"
+                || type == "queue-operation" {
+                continue
+            }
+
+            guard let message = json["message"] as? [String: Any],
+                  let role = message["role"] as? String else {
+                continue
+            }
+
+            let uuid = (json["uuid"] as? String) ?? UUID().uuidString
+            let timestamp = parseTimestamp(json["timestamp"] as? String)
+
+            var textParts: [String] = []
+            var toolCalls: [ToolCallSummary] = []
+
+            if let contentStr = message["content"] as? String {
+                let cleaned = contentStr.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !cleaned.isEmpty { textParts.append(cleaned) }
+            } else if let contentArray = message["content"] as? [[String: Any]] {
+                for block in contentArray {
+                    let blockType = block["type"] as? String
+                    if blockType == "text", let text = block["text"] as? String {
+                        let cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if !cleaned.isEmpty { textParts.append(cleaned) }
+                    } else if blockType == "tool_use" {
+                        let name = block["name"] as? String ?? "unknown"
+                        let summary = toolCallSummary(name: name, input: block["input"] as? [String: Any])
+                        toolCalls.append(ToolCallSummary(name: name, summary: summary))
+                    } else if blockType == "tool_result" {
+                        continue
+                    }
+                }
+            }
+
+            if textParts.isEmpty && toolCalls.isEmpty { continue }
+
+            let fullText = textParts.joined(separator: "\n\n")
+            messages.append(TranscriptMessage(
+                id: uuid,
+                role: role,
+                text: fullText,
+                timestamp: timestamp,
+                toolCalls: toolCalls
+            ))
+        }
+
+        Logger.debug("readTranscript: parsed \(messages.count) messages from \(tailLines.count) tail lines")
+        return messages
+    }
+
+    private func parseTimestamp(_ str: String?) -> Date? {
+        guard let str else { return nil }
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = formatter.date(from: str) { return date }
+        // Try without fractional seconds
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter.date(from: str)
+    }
+
+    private func toolCallSummary(name: String, input: [String: Any]?) -> String? {
+        guard let input else { return nil }
+        switch name {
+        case "Bash":
+            return input["command"] as? String
+        case "Read":
+            return input["file_path"] as? String
+        case "Edit":
+            return input["file_path"] as? String
+        case "Write":
+            return input["file_path"] as? String
+        case "Glob":
+            return input["pattern"] as? String
+        case "Grep":
+            return input["pattern"] as? String
+        case "Task":
+            return input["description"] as? String
+        case "AskUserQuestion":
+            if let questions = input["questions"] as? [[String: Any]],
+               let first = questions.first {
+                return first["question"] as? String
+            }
+            return nil
+        default:
+            return nil
+        }
+    }
+
+    // MARK: - PR URL detection
+
+    /// Scans the tail of a JSONL file for GitHub PR URLs or `pr-link` type entries.
+    func findPullRequestURL(jsonlPath: String) -> String? {
+        // Read a generous tail — PR links are typically near the end.
+        let tailLines = readTailLines(filePath: jsonlPath, lineCount: 100)
+        let prPattern = "https://github\\.com/[^/]+/[^/]+/pull/\\d+"
+        guard let regex = try? NSRegularExpression(pattern: prPattern) else { return nil }
+
+        // Scan in reverse to find the most recent PR link.
+        for line in tailLines.reversed() {
+            // Check for explicit pr-link type entries first.
+            if line.contains("\"pr-link\"") || line.contains("\"type\":\"pr-link\"") {
+                let range = NSRange(line.startIndex..., in: line)
+                if let match = regex.firstMatch(in: line, range: range),
+                   let matchRange = Range(match.range, in: line) {
+                    return String(line[matchRange])
+                }
+            }
+        }
+
+        // Fall back to regex search across all tail lines.
+        for line in tailLines.reversed() {
+            let range = NSRange(line.startIndex..., in: line)
+            if let match = regex.firstMatch(in: line, range: range),
+               let matchRange = Range(match.range, in: line) {
+                return String(line[matchRange])
+            }
+        }
+        return nil
     }
 
     // MARK: - Shell execution
