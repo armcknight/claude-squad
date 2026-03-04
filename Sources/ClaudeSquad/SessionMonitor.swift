@@ -14,9 +14,15 @@ final class SessionMonitor: ObservableObject {
     private let refreshInterval: TimeInterval
     private var timer: Timer?
 
+    /// Serial queue for refresh work to prevent concurrent access to mutable state.
+    private let refreshQueue = DispatchQueue(label: "com.claudesquad.refresh", qos: .utility)
+
     /// Tracks when each session (by id) first transitioned to a waiting state
     /// so that the `since` date persists across refresh cycles.
     private var waitingSince: [String: Date] = [:]
+
+    /// Cached transcripts by session ID, preserved across refresh cycles.
+    private var cachedTranscripts: [String: [TranscriptMessage]] = [:]
 
     /// Tracks the last-known status type per session for transition detection.
     private var previousStatusType: [String: Int] = [:]
@@ -49,7 +55,7 @@ final class SessionMonitor: ObservableObject {
 
     func refresh() {
         Logger.info("SessionMonitor.refresh() called, dispatching to background")
-        DispatchQueue.global(qos: .utility).async { [weak self] in
+        refreshQueue.async { [weak self] in
             guard let self else {
                 Logger.warning("SessionMonitor.refresh(): self was deallocated")
                 return
@@ -63,10 +69,17 @@ final class SessionMonitor: ObservableObject {
                 DispatchQueue.main.async {
                     let oldCount = self.sessions.count
                     self.checkTransitions(newSessions: sorted)
-                    self.sessions = sorted
+                    // Re-apply cached transcripts to the new session objects.
+                    var withTranscripts = sorted
+                    for i in withTranscripts.indices {
+                        if let cached = self.cachedTranscripts[withTranscripts[i].id] {
+                            withTranscripts[i].transcript = cached
+                        }
+                    }
+                    self.sessions = withTranscripts
                     self.lastError = nil
-                    if sorted.count != oldCount {
-                        Logger.info("Session count changed: \(oldCount) -> \(sorted.count)")
+                    if withTranscripts.count != oldCount {
+                        Logger.info("Session count changed: \(oldCount) -> \(withTranscripts.count)")
                     }
                 }
             } catch {
@@ -74,6 +87,31 @@ final class SessionMonitor: ObservableObject {
                 Logger.error("Session detection error details: \(String(describing: error))")
                 DispatchQueue.main.async {
                     self.lastError = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    // MARK: - Transcript loading (on demand)
+
+    /// Loads the most recent transcript for a session. Called when the detail view appears.
+    func loadTranscript(for sessionId: String) {
+        guard let index = sessions.firstIndex(where: { $0.id == sessionId }),
+              let jsonlPath = sessions[index].jsonlPath else {
+            Logger.debug("loadTranscript: no jsonlPath for session \(sessionId)")
+            return
+        }
+
+        Logger.info("loadTranscript: loading for session \(sessionId) from \(jsonlPath)")
+
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self else { return }
+            let transcript = self.detector.readTranscript(jsonlPath: jsonlPath)
+            Logger.info("loadTranscript: parsed \(transcript.count) messages for \(sessionId)")
+            DispatchQueue.main.async {
+                self.cachedTranscripts[sessionId] = transcript
+                if let idx = self.sessions.firstIndex(where: { $0.id == sessionId }) {
+                    self.sessions[idx].transcript = transcript
                 }
             }
         }

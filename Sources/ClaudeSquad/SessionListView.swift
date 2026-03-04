@@ -67,7 +67,7 @@ struct SessionListView: View {
             }
         } detail: {
             if let session = selectedSession {
-                SessionDetailView(session: session)
+                SessionDetailView(session: session, monitor: monitor)
             } else {
                 ContentUnavailableView(
                     "Select a Session",
