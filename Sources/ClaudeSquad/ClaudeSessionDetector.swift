@@ -38,48 +38,32 @@ final class ClaudeSessionDetector {
     func detectSessions() throws -> [ClaudeSession] {
         let claudeDir = claudeBasePath()
         let projectsDir = (claudeDir as NSString).appendingPathComponent("projects")
-        Logger.info("detectSessions() START — NSHomeDirectory()=\(NSHomeDirectory()), claudeDir=\(claudeDir), projectsDir=\(projectsDir)")
-        Logger.info("projectsDir exists: \(FileManager.default.fileExists(atPath: projectsDir))")
+        Logger.info("detectSessions() START — claudeDir=\(claudeDir)")
 
         guard FileManager.default.fileExists(atPath: projectsDir) else {
             Logger.info("No projects directory at \(projectsDir) — returning empty")
             return []
         }
 
-        // Step 1: Get all running claude processes with their cwds.
-        let runningProcesses = scanRunningClaudeProcesses()
-        Logger.info("Running claude processes: \(runningProcesses.map { "pid=\($0.pid) cwd=\($0.cwd)" })")
-
-        // Step 2: Find all project directories and their most recent JSONL files.
+        // Step 1: Find all project directories and their most recent JSONL files.
         let projectJSONLFiles = findProjectJSONLFiles(projectsDir: projectsDir)
-        Logger.info("Found \(projectJSONLFiles.count) project JSONL file(s): \(projectJSONLFiles.map { ($0 as NSString).lastPathComponent })")
+        Logger.info("Found \(projectJSONLFiles.count) project JSONL file(s)")
 
-        // Step 3: Analyze each session, skipping unchanged files.
+        // Step 2: Analyze each session, skipping unchanged files.
         var sessions: [ClaudeSession] = []
         for jsonlPath in projectJSONLFiles {
             // Check if file has changed since last analysis.
             if let cached = sessionCache[jsonlPath] {
-                let fm = FileManager.default
-                if let attrs = try? fm.attributesOfItem(atPath: jsonlPath),
+                if let attrs = try? FileManager.default.attributesOfItem(atPath: jsonlPath),
                    let modDate = attrs[.modificationDate] as? Date,
                    modDate == cached.modDate {
-                    // File unchanged — but re-check process liveness since
-                    // the process may have started or stopped independently.
-                    var session = cached.session
-                    let matchingProcess = runningProcesses.first { $0.cwd == session.projectPath }
-                    let hadProcess = session.processPID != nil
-                    let hasProcess = matchingProcess != nil
-                    if hadProcess == hasProcess {
-                        Logger.debug("Skipping unchanged session: \(session.displayName)")
-                        sessions.append(session)
-                        continue
-                    }
-                    // Process state changed — need full re-analysis.
-                    Logger.debug("Process state changed for \(session.displayName), re-analyzing")
+                    Logger.debug("Skipping unchanged session: \(cached.session.displayName)")
+                    sessions.append(cached.session)
+                    continue
                 }
             }
 
-            if let session = analyzeSession(jsonlPath: jsonlPath, runningProcesses: runningProcesses, claudeDir: claudeDir) {
+            if let session = analyzeSession(jsonlPath: jsonlPath, claudeDir: claudeDir) {
                 // Cache the result with the file's current modification date.
                 if let attrs = try? FileManager.default.attributesOfItem(atPath: jsonlPath),
                    let modDate = attrs[.modificationDate] as? Date {
@@ -89,7 +73,7 @@ final class ClaudeSessionDetector {
             }
         }
 
-        // Step 4: Clean caches of stale entries.
+        // Step 3: Clean caches of stale entries.
         let currentPaths = Set(projectJSONLFiles)
         firstLineCache = firstLineCache.filter { currentPaths.contains($0.key) }
         sessionCache = sessionCache.filter { currentPaths.contains($0.key) }
@@ -103,92 +87,6 @@ final class ClaudeSessionDetector {
     func claudeBasePath() -> String {
         let home = NSHomeDirectory()
         return (home as NSString).appendingPathComponent(".claude")
-    }
-
-    // MARK: - Process scanning
-
-    struct RunningClaude {
-        let pid: Int32
-        let cwd: String
-    }
-
-    /// Scans for running `claude` processes and their working directories.
-    func scanRunningClaudeProcesses() -> [RunningClaude] {
-        let psPids = findClaudePIDs()
-        guard !psPids.isEmpty else {
-            Logger.info("No claude PIDs found via ps")
-            return []
-        }
-        Logger.info("Found claude PIDs: \(psPids)")
-
-        let cwdMap = getProcessCWDs(pids: psPids)
-        Logger.debug("lsof cwd map: \(cwdMap)")
-
-        let result = psPids.compactMap { pid -> RunningClaude? in
-            guard let cwd = cwdMap[pid] else {
-                Logger.debug("No cwd from lsof for pid \(pid)")
-                return nil
-            }
-            return RunningClaude(pid: pid, cwd: cwd)
-        }
-        return result
-    }
-
-    /// Returns PIDs of all running `claude` processes.
-    func findClaudePIDs() -> [Int32] {
-        guard let output = try? runShell("/bin/ps", args: ["-eo", "pid,comm"]) else {
-            Logger.warning("Failed to run ps -eo pid,comm")
-            return []
-        }
-        let lines = output.components(separatedBy: "\n")
-        Logger.debug("ps returned \(lines.count) lines")
-        var pids: [Int32] = []
-        var claudeRelated: [String] = []
-        for line in lines {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            let parts = trimmed.components(separatedBy: .whitespaces).filter { !$0.isEmpty }
-            guard parts.count >= 2, let pid = Int32(parts[0]) else { continue }
-            let comm = parts[1...].joined(separator: " ")
-            let basename = (comm as NSString).lastPathComponent.lowercased()
-            // Collect any process with "claude" in the name for diagnostics.
-            if basename.contains("claude") {
-                claudeRelated.append("pid=\(pid) comm=\(comm) basename=\(basename)")
-            }
-            if basename == "claude" || basename.hasPrefix("claude ") {
-                pids.append(pid)
-            }
-        }
-        if !claudeRelated.isEmpty {
-            Logger.info("Claude-related processes found: \(claudeRelated)")
-        } else {
-            Logger.info("No claude-related processes found in ps output")
-        }
-        return pids
-    }
-
-    /// Returns a map of PID → cwd for the given PIDs using `proc_pidinfo`.
-    /// Unlike lsof, this uses a direct Darwin syscall that works under hardened runtime.
-    func getProcessCWDs(pids: [Int32]) -> [Int32: String] {
-        guard !pids.isEmpty else { return [:] }
-        var result: [Int32: String] = [:]
-        let infoSize = Int32(MemoryLayout<proc_vnodepathinfo>.size)
-        for pid in pids {
-            var vnodeInfo = proc_vnodepathinfo()
-            let ret = proc_pidinfo(pid, PROC_PIDVNODEPATHINFO, 0, &vnodeInfo, infoSize)
-            guard ret == infoSize else {
-                Logger.debug("proc_pidinfo failed for pid \(pid) (ret=\(ret))")
-                continue
-            }
-            let cwd = withUnsafePointer(to: &vnodeInfo.pvi_cdir.vip_path) {
-                $0.withMemoryRebound(to: CChar.self, capacity: Int(MAXPATHLEN)) {
-                    String(cString: $0)
-                }
-            }
-            if !cwd.isEmpty {
-                result[pid] = cwd
-            }
-        }
-        return result
     }
 
     // MARK: - Project JSONL discovery
@@ -237,7 +135,8 @@ final class ClaudeSessionDetector {
     // MARK: - Session analysis
 
     /// Analyzes a single JSONL file to build a `ClaudeSession`.
-    func analyzeSession(jsonlPath: String, runningProcesses: [RunningClaude], claudeDir: String) -> ClaudeSession? {
+    /// Status is determined purely from JSONL content + file modification time.
+    func analyzeSession(jsonlPath: String, claudeDir: String) -> ClaudeSession? {
         let fm = FileManager.default
         let fileName = (jsonlPath as NSString).lastPathComponent
 
@@ -245,6 +144,13 @@ final class ClaudeSessionDetector {
         guard let attrs = try? fm.attributesOfItem(atPath: jsonlPath),
               let lastModified = attrs[.modificationDate] as? Date else {
             Logger.warning("Cannot read attributes for \(fileName)")
+            return nil
+        }
+
+        // Skip sessions older than maxInactiveAge.
+        let age = Date().timeIntervalSince(lastModified)
+        if age > maxInactiveAge {
+            Logger.debug("Skipping stale session (inactive \(Int(age/3600))h)")
             return nil
         }
 
@@ -258,58 +164,11 @@ final class ClaudeSessionDetector {
         let sessionId = meta.sessionId
         Logger.debug("Analyzing session \(sessionId): cwd=\(cwd)")
 
-        // Check if inactive too long.
-        let matchingProcess = runningProcesses.first { $0.cwd == cwd }
-        if let proc = matchingProcess {
-            Logger.debug("  Matched running process pid=\(proc.pid)")
-        } else {
-            Logger.debug("  No matching running process for cwd=\(cwd)")
-            let age = Date().timeIntervalSince(lastModified)
-            if age > maxInactiveAge {
-                Logger.debug("  Skipping stale session (inactive \(Int(age/3600))h)")
-                return nil
-            }
-        }
-
         // Read tail lines to determine status.
         let tailLines = readTailLines(filePath: jsonlPath, lineCount: tailLineCount)
         Logger.debug("  Read \(tailLines.count) tail lines")
-        var status = determineStatus(tailLines: tailLines, lastModified: lastModified)
-        Logger.debug("  JSONL-derived status: \(status)")
-
-        if matchingProcess != nil {
-            // We have a running process. If JSONL analysis couldn't determine
-            // an active status (e.g. tail lines were unparseable), trust the
-            // process signal — the session is running. But if JSONL explicitly
-            // detected an interruption (user hit Esc), trust that over the
-            // process match (which may be a stale tmux launcher shell).
-            if case .interrupted = status {
-                Logger.debug("  Process matched but JSONL says interrupted — trusting JSONL")
-            } else if !status.isActive {
-                Logger.debug("  Process matched but JSONL says inactive — overriding to running")
-                status = .running
-            }
-        } else {
-            // No matching process. Use file recency as a secondary signal:
-            // if the file was modified very recently, something is writing to
-            // it, so trust the JSONL-derived status instead of forcing inactive.
-            let timeSinceModified = Date().timeIntervalSince(lastModified)
-            if timeSinceModified > 30 {
-                // File is stale and process is gone. If JSONL says the session
-                // was mid-work (running or asking a question), it was interrupted
-                // (user hit Esc/Ctrl-C). If it was idle, mark inactive.
-                switch status {
-                case .running, .waitingForQuestion:
-                    status = .interrupted(lastActivity: lastModified)
-                    Logger.debug("  Overridden to interrupted (no process, was \(status), file stale \(Int(timeSinceModified))s)")
-                default:
-                    status = .inactive(lastActivity: lastModified)
-                    Logger.debug("  Overridden to inactive (no process, file stale \(Int(timeSinceModified))s)")
-                }
-            } else {
-                Logger.debug("  No process but file recently modified (\(Int(timeSinceModified))s) — keeping JSONL status")
-            }
-        }
+        let status = determineStatus(tailLines: tailLines, lastModified: lastModified)
+        Logger.debug("  Status: \(status)")
 
         // Prefer git branch from JSONL metadata, fall back to .git/HEAD.
         let gitBranch = meta.gitBranch ?? readGitBranch(projectPath: cwd)
@@ -329,7 +188,6 @@ final class ClaudeSessionDetector {
             gitBranch: gitBranch,
             slug: meta.slug,
             status: status,
-            processPID: matchingProcess?.pid,
             taskSummary: taskSummary,
             lastModified: lastModified
         )
@@ -521,6 +379,13 @@ final class ClaudeSessionDetector {
                     }
                 }
                 // Normal user message → Claude should be processing.
+                // If file is stale, Claude stopped responding → interrupted.
+                let staleness = Date().timeIntervalSince(lastModified)
+                if staleness > 30 {
+                    Logger.debug("    -> interrupted (user message but file stale \(Int(staleness))s)")
+                    return .interrupted(lastActivity: lastModified)
+                }
+                Logger.debug("    -> running (user message, file fresh)")
                 return .running
             }
 
@@ -916,26 +781,4 @@ final class ClaudeSessionDetector {
         return nil
     }
 
-    // MARK: - Shell execution
-
-    func runShell(_ executable: String, args: [String]) throws -> String {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: executable)
-        process.arguments = args
-
-        let outPipe = Pipe()
-        let errPipe = Pipe()
-        process.standardOutput = outPipe
-        process.standardError = errPipe
-
-        try process.run()
-
-        // Read pipe data BEFORE waitUntilExit to avoid deadlock when output
-        // exceeds the pipe buffer size (~64KB). The child process blocks on
-        // write if the buffer is full, and waitUntilExit blocks on the child.
-        let data = outPipe.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-
-        return String(data: data, encoding: .utf8) ?? ""
-    }
 }

@@ -144,9 +144,6 @@ struct ClaudeSession: Identifiable {
     /// Current state of the session.
     var status: SessionStatus
 
-    /// PID of the running claude process, if any.
-    var processPID: Int32?
-
     /// Task progress summary, if tasks/todos exist.
     var taskSummary: TaskSummary?
 
@@ -183,7 +180,6 @@ extension ClaudeSession: Comparable {
         lhs.id == rhs.id
             && lhs.status == rhs.status
             && lhs.taskSummary == rhs.taskSummary
-            && lhs.processPID == rhs.processPID
             && lhs.gitBranch == rhs.gitBranch
     }
 }

@@ -61,13 +61,6 @@ struct SessionDetailView: View {
                     }
                 }
 
-                if let pid = session.processPID {
-                    LabeledContent("PID") {
-                        Text(String(pid))
-                            .monospacedDigit()
-                    }
-                }
-
                 // Question text
                 if case .waitingForQuestion(_, let question) = session.status, let question {
                     Divider()
