@@ -197,6 +197,8 @@ final class MenuBarController {
             return "❓ \(name) — question (\(Date().timeIntervalSince(since).formattedDuration))"
         case .waitingIdle(let since):
             return "⏳ \(name) — idle (\(Date().timeIntervalSince(since).formattedDuration))"
+        case .interrupted(let lastActivity):
+            return "⛔ \(name) — interrupted (\(Date().timeIntervalSince(lastActivity).formattedDuration) ago)"
         case .inactive(let lastActivity):
             return "⏸ \(name) — inactive (\(Date().timeIntervalSince(lastActivity).formattedDuration) ago)"
         }
