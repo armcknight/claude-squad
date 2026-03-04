@@ -21,6 +21,10 @@ final class ClaudeSessionDetector {
     /// Cache: JSONL file path → session metadata extracted from early lines.
     private var firstLineCache: [String: FirstLineInfo] = [:]
 
+    /// Cache: JSONL file path → (last modification date, last analyzed session).
+    /// If the file hasn't changed since last check, reuse the cached session.
+    private var sessionCache: [String: (modDate: Date, session: ClaudeSession)] = [:]
+
     struct FirstLineInfo {
         let cwd: String
         let sessionId: String
@@ -50,17 +54,45 @@ final class ClaudeSessionDetector {
         let projectJSONLFiles = findProjectJSONLFiles(projectsDir: projectsDir)
         Logger.info("Found \(projectJSONLFiles.count) project JSONL file(s): \(projectJSONLFiles.map { ($0 as NSString).lastPathComponent })")
 
-        // Step 3: Analyze each session.
+        // Step 3: Analyze each session, skipping unchanged files.
         var sessions: [ClaudeSession] = []
         for jsonlPath in projectJSONLFiles {
+            // Check if file has changed since last analysis.
+            if let cached = sessionCache[jsonlPath] {
+                let fm = FileManager.default
+                if let attrs = try? fm.attributesOfItem(atPath: jsonlPath),
+                   let modDate = attrs[.modificationDate] as? Date,
+                   modDate == cached.modDate {
+                    // File unchanged — but re-check process liveness since
+                    // the process may have started or stopped independently.
+                    var session = cached.session
+                    let matchingProcess = runningProcesses.first { $0.cwd == session.projectPath }
+                    let hadProcess = session.processPID != nil
+                    let hasProcess = matchingProcess != nil
+                    if hadProcess == hasProcess {
+                        Logger.debug("Skipping unchanged session: \(session.displayName)")
+                        sessions.append(session)
+                        continue
+                    }
+                    // Process state changed — need full re-analysis.
+                    Logger.debug("Process state changed for \(session.displayName), re-analyzing")
+                }
+            }
+
             if let session = analyzeSession(jsonlPath: jsonlPath, runningProcesses: runningProcesses, claudeDir: claudeDir) {
+                // Cache the result with the file's current modification date.
+                if let attrs = try? FileManager.default.attributesOfItem(atPath: jsonlPath),
+                   let modDate = attrs[.modificationDate] as? Date {
+                    sessionCache[jsonlPath] = (modDate: modDate, session: session)
+                }
                 sessions.append(session)
             }
         }
 
-        // Step 4: Clean first-line cache of stale entries.
+        // Step 4: Clean caches of stale entries.
         let currentPaths = Set(projectJSONLFiles)
         firstLineCache = firstLineCache.filter { currentPaths.contains($0.key) }
+        sessionCache = sessionCache.filter { currentPaths.contains($0.key) }
 
         Logger.info("detectSessions() END — \(sessions.count) session(s): \(sessions.map { "\($0.displayName) [\($0.status)]" })")
         return sessions

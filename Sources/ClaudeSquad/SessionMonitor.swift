@@ -131,12 +131,12 @@ final class SessionMonitor: ObservableObject {
 
         for var session in sessions {
             switch session.status {
-            case .waitingIdle:
-                let since = waitingSince[session.id] ?? now
+            case .waitingIdle(let detectedSince):
+                let since = waitingSince[session.id] ?? detectedSince
                 waitingSince[session.id] = since
                 session.status = .waitingIdle(since: since)
-            case .waitingForQuestion(_, let question):
-                let since = waitingSince[session.id] ?? now
+            case .waitingForQuestion(let detectedSince, let question):
+                let since = waitingSince[session.id] ?? detectedSince
                 waitingSince[session.id] = since
                 session.status = .waitingForQuestion(since: since, question: question)
             default:
