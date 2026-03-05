@@ -16,11 +16,12 @@ extension SessionStatus {
 /// Path on line 1, branch on line 2. Elapsed time and task count right-aligned.
 struct SessionRowView: View {
     let session: ClaudeSession
+    var displayNameOverride: String?
 
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(session.displayName)
+                Text(displayNameOverride ?? session.displayName)
                     .fontWeight(.medium)
                     .lineLimit(1)
                     .truncationMode(.middle)
