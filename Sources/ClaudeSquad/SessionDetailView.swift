@@ -76,27 +76,6 @@ struct SessionDetailView: View {
                     }
                 }
 
-                // Task list
-                if !session.taskItems.isEmpty {
-                    Divider()
-                    taskListSection
-                } else if let tasks = session.taskSummary {
-                    Divider()
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Tasks")
-                            .font(.headline)
-                        ProgressView(value: Double(tasks.completed), total: Double(tasks.total))
-                        HStack {
-                            Text("\(tasks.completed)/\(tasks.total) completed")
-                            if tasks.inProgress > 0 {
-                                Text("(\(tasks.inProgress) in progress)")
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                        .font(.caption)
-                    }
-                }
-
                 Divider()
 
                 // Actions
@@ -119,6 +98,27 @@ struct SessionDetailView: View {
                         } label: {
                             Label("Open PR", systemImage: "arrow.up.right.square")
                         }
+                    }
+                }
+
+                // Task list
+                if !session.taskItems.isEmpty {
+                    Divider()
+                    taskListSection
+                } else if let tasks = session.taskSummary {
+                    Divider()
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Tasks")
+                            .font(.headline)
+                        ProgressView(value: Double(tasks.completed), total: Double(tasks.total))
+                        HStack {
+                            Text("\(tasks.completed)/\(tasks.total) completed")
+                            if tasks.inProgress > 0 {
+                                Text("(\(tasks.inProgress) in progress)")
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .font(.caption)
                     }
                 }
 

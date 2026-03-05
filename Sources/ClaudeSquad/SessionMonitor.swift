@@ -128,24 +128,30 @@ final class SessionMonitor: ObservableObject {
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self else { return }
-            // Throttle: only dispatch progress to main at most every 200ms.
-            // We skip intermediate values entirely (no dispatch) to avoid flooding main queue.
-            var lastProgressTime = CFAbsoluteTimeGetCurrent()
+            // Throttle progress to ~5 updates/sec. Use main.sync so SwiftUI actually
+            // processes each update before we continue reading, but only when we
+            // actually emit an update (most callbacks are skipped by the throttle).
+            var lastProgressTime: CFAbsoluteTime = 0
+            var callbackCount = 0
             let transcript = self.detector.readTranscript(jsonlPath: jsonlPath) { progress in
+                callbackCount += 1
                 let now = CFAbsoluteTimeGetCurrent()
-                if now - lastProgressTime >= 0.2 || progress >= 1.0 {
+                let elapsed = now - lastProgressTime
+                if lastProgressTime == 0 || elapsed >= 0.2 || progress >= 1.0 {
+                    Logger.info("loadTranscript: emitting progress \(Int(progress * 100))% (callback #\(callbackCount), elapsed \(String(format: "%.3f", elapsed))s)")
                     lastProgressTime = now
-                    DispatchQueue.main.async {
+                    DispatchQueue.main.sync {
                         self.transcriptLoadState[sessionId] = .loading(progress: progress)
                     }
                 }
             }
             Logger.info("loadTranscript: read \(transcript.count) messages for \(sessionId)")
             let modDate = (try? FileManager.default.attributesOfItem(atPath: jsonlPath))?[.modificationDate] as? Date
-            DispatchQueue.main.async {
+            // Set parsing state and wait for SwiftUI to render it.
+            DispatchQueue.main.sync {
                 self.transcriptLoadState[sessionId] = .parsing
             }
-            // Allow a run loop cycle for SwiftUI to render parsing state.
+            // Final update: clear state and set transcript.
             DispatchQueue.main.async {
                 self.transcriptLoadState.removeValue(forKey: sessionId)
                 self.cachedTranscripts[sessionId] = transcript
