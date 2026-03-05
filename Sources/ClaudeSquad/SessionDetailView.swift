@@ -39,8 +39,18 @@ struct SessionDetailView: View {
                             Image(systemName: "doc.on.doc")
                                 .font(.caption)
                         }
-                        .buttonStyle(.borderless)
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
                         .help("Copy path")
+                        Button {
+                            NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: session.projectPath)
+                        } label: {
+                            Image(systemName: "folder")
+                                .font(.caption)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .help("Reveal in Finder")
                     }
                 }
 
@@ -56,8 +66,21 @@ struct SessionDetailView: View {
                                 Image(systemName: "doc.on.doc")
                                     .font(.caption)
                             }
-                            .buttonStyle(.borderless)
+                            .buttonStyle(.bordered)
+                        .controlSize(.small)
                             .help("Copy branch")
+                            if let prURL = session.pullRequestURL, let url = URL(string: prURL) {
+                                Button {
+                                    NSWorkspace.shared.open(url)
+                                } label: {
+                                    let prNumber = url.lastPathComponent
+                                    Text("PR #\(prNumber)")
+                                        .font(.caption)
+                                }
+                                .buttonStyle(.bordered)
+                        .controlSize(.small)
+                                .help("Open Pull Request")
+                            }
                         }
                     }
                 }
@@ -74,31 +97,6 @@ struct SessionDetailView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .background(.quaternary)
                             .clipShape(RoundedRectangle(cornerRadius: 6))
-                    }
-                }
-
-                Divider()
-
-                // Actions
-                HStack(spacing: 12) {
-                    Button {
-                        TerminalLauncher.open(at: session.projectPath)
-                    } label: {
-                        Label("Open in Terminal", systemImage: "terminal")
-                    }
-
-                    Button {
-                        NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: session.projectPath)
-                    } label: {
-                        Label("Reveal in Finder", systemImage: "folder")
-                    }
-
-                    if let prURL = session.pullRequestURL, let url = URL(string: prURL) {
-                        Button {
-                            NSWorkspace.shared.open(url)
-                        } label: {
-                            Label("Open PR", systemImage: "arrow.up.right.square")
-                        }
                     }
                 }
 
