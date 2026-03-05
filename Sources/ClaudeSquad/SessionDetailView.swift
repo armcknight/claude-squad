@@ -129,6 +129,7 @@ struct SessionDetailView: View {
             }
             .padding()
         }
+        .accessibilityIdentifier("session-detail")
         .onAppear {
             if let jsonlPath = session.jsonlPath {
                 transcriptLoader.loadIfNeeded(sessionId: session.id, jsonlPath: jsonlPath)

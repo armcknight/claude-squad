@@ -31,6 +31,7 @@ struct SessionListView: View {
                                 expandedSections[priority] = !isSectionExpanded
                             }
                         }
+                        .accessibilityIdentifier("section-\(status.sectionTitle)")
                         .selectionDisabled()
                         .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 10))
                         .listRowBackground(Color(nsColor: .textBackgroundColor))
@@ -88,6 +89,7 @@ struct SessionListView: View {
             return AnyView(
                 SessionRowView(session: session, displayNameOverride: node.displayLabel)
                     .tag(session)
+                    .accessibilityIdentifier("session-row-\(session.id)")
             )
         } else if node.sessions.isEmpty && node.children.count == 1 {
             // Pass-through: single child, no sessions — skip rendering this node
@@ -126,6 +128,7 @@ struct SessionListView: View {
                     ForEach(node.sessions) { session in
                         SessionRowView(session: session, displayNameOverride: session.projectName)
                             .tag(session)
+                            .accessibilityIdentifier("session-row-\(session.id)")
                             .padding(.leading, 8)
                     }
                     // Child directories

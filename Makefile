@@ -16,6 +16,10 @@ build:
 test:
 	set -o pipefail && xcodebuild -project ClaudeSquad.xcodeproj -scheme ClaudeSquad -configuration Debug test | xcbeautify
 
+.PHONY: screenshots
+screenshots:
+	./scripts/take-screenshots.sh
+
 .PHONY: clean
 clean:
 	rm -rf ~/Library/Developer/Xcode/DerivedData

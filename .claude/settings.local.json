@@ -34,7 +34,8 @@
       "mcp__xcode-index-mcp__load_index",
       "mcp__xcode-index-mcp__search_pattern",
       "Bash(xcodegen generate:*)",
-      "Bash(head:*)"
+      "Bash(head:*)",
+      "Bash(xcrun xcresulttool:*)"
     ],
     "deny": []
   }

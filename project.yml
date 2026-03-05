@@ -58,11 +58,23 @@ targets:
       Debug: config/ClaudeSquadTests.xcconfig
       Release: config/ClaudeSquadTests.xcconfig
 
+  ClaudeSquadUITests:
+    type: bundle.ui-testing
+    platform: macOS
+    sources:
+      - Tests/ClaudeSquadUITests
+    dependencies:
+      - target: ClaudeSquad
+    configFiles:
+      Debug: config/ClaudeSquadUITests.xcconfig
+      Release: config/ClaudeSquadUITests.xcconfig
+
 schemes:
   ClaudeSquad:
     build:
       targets:
         ClaudeSquad: all
+        ClaudeSquadUITests: [test]
     run:
       config: Debug
       commandLineArguments:
@@ -71,6 +83,7 @@ schemes:
       config: Debug
       targets:
         - ClaudeSquadTests
+        - ClaudeSquadUITests
     profile:
       config: Release
     analyze:
