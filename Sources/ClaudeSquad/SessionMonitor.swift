@@ -33,7 +33,7 @@ final class SessionMonitor: ObservableObject {
     init(detector: ClaudeSessionDetector = .shared, refreshInterval: TimeInterval = 3) {
         self.detector = detector
         self.refreshInterval = refreshInterval
-        self.transcriptLoader = TranscriptLoader(detector: detector)
+        self.transcriptLoader =  TranscriptLoader(detector: detector)
     }
 
     // MARK: - Lifecycle

@@ -131,9 +131,9 @@ struct SessionDetailView: View {
             }
             .padding()
         }
-        .task {
+        .onAppear {
             if let jsonlPath = session.jsonlPath {
-                await transcriptLoader.loadIfNeeded(sessionId: session.id, jsonlPath: jsonlPath)
+                transcriptLoader.loadIfNeeded(sessionId: session.id, jsonlPath: jsonlPath)
             }
         }
     }
@@ -198,43 +198,38 @@ struct SessionDetailView: View {
 
     // MARK: - Transcript
 
+    /// Use cached transcript from the loader (available immediately) over the
+    /// session's copy (only updated on the next refresh cycle).
+    private var transcript: [TranscriptMessage] {
+        transcriptLoader.cachedTranscripts[session.id] ?? session.transcript
+    }
+
     private var transcriptSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Text("Transcript")
                     .font(.headline)
-                if !session.transcript.isEmpty {
-                    Text("(\(session.transcript.count) messages)")
+                if !transcript.isEmpty {
+                    Text("(\(transcript.count) messages)")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
             }
 
-            if session.transcript.isEmpty {
-                if case .parsing = transcriptLoader.loadStates[session.id] {
-                    HStack(spacing: 8) {
-                        ProgressView()
-                            .controlSize(.small)
-                        Text("Parsing…")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                } else {
-                    // Show progress bar for loading state or initial state (before first update arrives)
-                    let progress: Double = {
-                        if case .loading(let p) = transcriptLoader.loadStates[session.id] { return p }
-                        return 0.0
-                    }()
-                    VStack(spacing: 4) {
-                        ProgressView(value: progress)
-                        Text("Loading… \(Int(progress * 100))%")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+            if transcript.isEmpty {
+                let progress: Double = {
+                    if case .loading(let p) = transcriptLoader.loadStates[session.id] { return p }
+                    return 0.0
+                }()
+                VStack(spacing: 4) {
+                    ProgressView(value: progress)
+                    Text("Loading… \(Int(progress * 100))%")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             } else {
                 LazyVStack(alignment: .leading, spacing: 8) {
-                    ForEach(session.transcript.reversed()) { message in
+                    ForEach(transcript.reversed()) { message in
                         transcriptBubble(message)
                     }
                 }

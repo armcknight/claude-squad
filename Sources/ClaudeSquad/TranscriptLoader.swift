@@ -30,8 +30,13 @@ final class TranscriptLoader: ObservableObject {
         cachedTranscripts[sessionId]
     }
 
-    /// Loads the transcript for a session if needed. Call from view's .onAppear or .task.
-    func loadIfNeeded(sessionId: String, jsonlPath: String) async {
+    /// Loads the transcript for a session if needed. Safe to call repeatedly;
+    /// guards against duplicate loads internally. Not async — fires a detached
+    /// task so loading is not cancelled when SwiftUI recreates the view.
+    func loadIfNeeded(sessionId: String, jsonlPath: String) {
+        // Don't restart if already loading.
+        if case .loading = loadStates[sessionId] { return }
+
         // Check if file has changed since we last loaded.
         if let attrs = try? FileManager.default.attributesOfItem(atPath: jsonlPath),
            let modDate = attrs[.modificationDate] as? Date,
@@ -42,41 +47,33 @@ final class TranscriptLoader: ObservableObject {
             return
         }
 
-        // Don't restart if already loading.
-        if case .loading = loadStates[sessionId] { return }
-        if case .parsing = loadStates[sessionId] { return }
-
         Logger.info("TranscriptLoader: loading \(sessionId)")
         loadStates[sessionId] = .loading(progress: 0.0)
 
-        // Read on a background thread, yielding progress back to main actor.
-        let result = await Task.detached(priority: .userInitiated) { [detector] () -> (transcript: [TranscriptMessage], modDate: Date?) in
+        // Fire-and-forget detached task so it survives view recreation.
+        Task.detached(priority: .userInitiated) { [weak self, detector] in
             var lastEmitTime: CFAbsoluteTime = 0
             let transcript = detector.readTranscript(jsonlPath: jsonlPath) { progress in
                 let now = CFAbsoluteTimeGetCurrent()
                 if lastEmitTime == 0 || now - lastEmitTime >= 0.15 || progress >= 1.0 {
                     lastEmitTime = now
-                    // Fire-and-forget to main actor; we don't block the reader.
-                    Task { @MainActor [weak self = self] in
+                    Task { @MainActor [weak self] in
                         self?.loadStates[sessionId] = .loading(progress: progress)
                     }
                 }
             }
             let modDate = (try? FileManager.default.attributesOfItem(atPath: jsonlPath))?[.modificationDate] as? Date
-            return (transcript, modDate)
-        }.value
 
-        Logger.info("TranscriptLoader: parsed \(result.transcript.count) messages for \(sessionId)")
-        loadStates[sessionId] = .parsing
-
-        // Yield to let SwiftUI render the parsing state.
-        await Task.yield()
-
-        cachedTranscripts[sessionId] = result.transcript
-        if let modDate = result.modDate {
-            transcriptModDates[sessionId] = modDate
+            await MainActor.run {
+                guard let self else { return }
+                Logger.info("TranscriptLoader: parsed \(transcript.count) messages for \(sessionId)")
+                self.cachedTranscripts[sessionId] = transcript
+                if let modDate {
+                    self.transcriptModDates[sessionId] = modDate
+                }
+                self.loadStates.removeValue(forKey: sessionId)
+            }
         }
-        loadStates.removeValue(forKey: sessionId)
     }
 
     /// Re-applies cached transcripts to a session array (called after refresh).
