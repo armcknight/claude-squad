@@ -15,9 +15,6 @@ final class ClaudeSessionDetector {
     /// Chunk size for backward-seeking tail reads and forward head reads.
     private let chunkSize = 8192
 
-    /// Skip inactive sessions older than this.
-    private let maxInactiveAge: TimeInterval = 24 * 60 * 60
-
     /// Cache: JSONL file path → session metadata extracted from early lines.
     private var firstLineCache: [String: FirstLineInfo] = [:]
 
@@ -144,13 +141,6 @@ final class ClaudeSessionDetector {
         guard let attrs = try? fm.attributesOfItem(atPath: jsonlPath),
               let lastModified = attrs[.modificationDate] as? Date else {
             Logger.warning("Cannot read attributes for \(fileName)")
-            return nil
-        }
-
-        // Skip sessions older than maxInactiveAge.
-        let age = Date().timeIntervalSince(lastModified)
-        if age > maxInactiveAge {
-            Logger.debug("Skipping stale session (inactive \(Int(age/3600))h)")
             return nil
         }
 
