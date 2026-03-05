@@ -10,6 +10,13 @@ final class SessionMonitor: ObservableObject {
     /// Set to the most recent error string if a refresh cycle fails.
     @Published private(set) var lastError: String?
 
+    /// Transcript loading state per session ID. Nil = not loading / already loaded.
+    enum TranscriptLoadState {
+        case loading(progress: Double) // 0.0–1.0 of file bytes read
+        case parsing
+    }
+    @Published private(set) var transcriptLoadState: [String: TranscriptLoadState] = [:]
+
     private let detector: ClaudeSessionDetector
     private let refreshInterval: TimeInterval
     private var timer: Timer?
@@ -23,6 +30,9 @@ final class SessionMonitor: ObservableObject {
 
     /// Cached transcripts by session ID, preserved across refresh cycles.
     private var cachedTranscripts: [String: [TranscriptMessage]] = [:]
+
+    /// Last modification date of the JSONL file when we loaded its transcript.
+    private var transcriptModDates: [String: Date] = [:]
 
     /// Tracks the last-known status type per session for transition detection.
     private var previousStatusType: [String: Int] = [:]
@@ -102,16 +112,52 @@ final class SessionMonitor: ObservableObject {
             return
         }
 
+        // Check if file has changed since we last loaded this transcript.
+        if let attrs = try? FileManager.default.attributesOfItem(atPath: jsonlPath),
+           let modDate = attrs[.modificationDate] as? Date,
+           let lastMod = transcriptModDates[sessionId],
+           modDate == lastMod,
+           cachedTranscripts[sessionId] != nil {
+            Logger.debug("loadTranscript: skipping unchanged file for \(sessionId)")
+            return
+        }
+
         Logger.info("loadTranscript: loading for session \(sessionId) from \(jsonlPath)")
+        Logger.info("loadTranscript: setting state to .loading(0.0) for \(sessionId)")
+        transcriptLoadState[sessionId] = .loading(progress: 0.0)
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self else { return }
-            let transcript = self.detector.readTranscript(jsonlPath: jsonlPath)
-            Logger.info("loadTranscript: parsed \(transcript.count) messages for \(sessionId)")
-            DispatchQueue.main.async {
+            // Throttle progress updates so SwiftUI has time to render between them.
+            var lastProgressUpdate = DispatchTime.now()
+            let throttleInterval: UInt64 = 100_000_000 // 100ms in nanoseconds
+            let transcript = self.detector.readTranscript(jsonlPath: jsonlPath) { progress in
+                let now = DispatchTime.now()
+                guard now.uptimeNanoseconds - lastProgressUpdate.uptimeNanoseconds >= throttleInterval || progress >= 1.0 else { return }
+                lastProgressUpdate = now
+                DispatchQueue.main.sync {
+                    Logger.info("loadTranscript: progress \(Int(progress * 100))% for \(sessionId)")
+                    self.transcriptLoadState[sessionId] = .loading(progress: progress)
+                }
+            }
+            Logger.info("loadTranscript: read \(transcript.count) messages for \(sessionId)")
+            // Record the file's mod date so we can skip reloading if unchanged.
+            let modDate = (try? FileManager.default.attributesOfItem(atPath: jsonlPath))?[.modificationDate] as? Date
+            DispatchQueue.main.sync {
+                Logger.info("loadTranscript: setting state to .parsing for \(sessionId)")
+                self.transcriptLoadState[sessionId] = .parsing
+            }
+            // Small delay so SwiftUI can render the parsing state before we clear it.
+            Thread.sleep(forTimeInterval: 0.1)
+            DispatchQueue.main.sync {
+                Logger.info("loadTranscript: clearing state for \(sessionId), \(transcript.count) messages")
+                self.transcriptLoadState.removeValue(forKey: sessionId)
                 self.cachedTranscripts[sessionId] = transcript
+                if let modDate { self.transcriptModDates[sessionId] = modDate }
                 if let idx = self.sessions.firstIndex(where: { $0.id == sessionId }) {
-                    self.sessions[idx].transcript = transcript
+                    var updated = self.sessions
+                    updated[idx].transcript = transcript
+                    self.sessions = updated
                 }
             }
         }

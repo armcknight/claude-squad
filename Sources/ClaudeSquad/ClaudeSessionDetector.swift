@@ -163,11 +163,14 @@ final class ClaudeSessionDetector {
         // Prefer git branch from JSONL metadata, fall back to .git/HEAD.
         let gitBranch = meta.gitBranch ?? readGitBranch(projectPath: cwd)
 
-        // Read task summary.
-        let taskSummary = readTaskSummary(sessionId: sessionId, claudeDir: claudeDir)
-
-        // Read full task items.
+        // Read full task items and derive summary from them.
         let taskItems = readTaskItems(sessionId: sessionId, claudeDir: claudeDir)
+        let taskSummary: TaskSummary? = taskItems.isEmpty ? nil : {
+            let completed = taskItems.filter { $0.status == "completed" }.count
+            let inProgress = taskItems.filter { $0.status == "in_progress" }.count
+            let pending = taskItems.count - completed - inProgress
+            return TaskSummary(total: taskItems.count, completed: completed, inProgress: inProgress, pending: pending)
+        }()
 
         // Find PR URL.
         let prURL = findPullRequestURL(jsonlPath: jsonlPath)
@@ -514,9 +517,11 @@ final class ClaudeSessionDetector {
         var pending = 0
 
         readTasksFromDirectory(todosDir, sessionId: sessionId, total: &total, completed: &completed, inProgress: &inProgress, pending: &pending)
+        Logger.info("readTaskSummary(\(sessionId)): after todosDir: total=\(total) completed=\(completed) inProgress=\(inProgress) pending=\(pending)")
 
         let sessionTasksDir = (tasksDir as NSString).appendingPathComponent(sessionId)
         readTasksFromDirectory(sessionTasksDir, sessionId: nil, total: &total, completed: &completed, inProgress: &inProgress, pending: &pending)
+        Logger.info("readTaskSummary(\(sessionId)): after tasksDir: total=\(total) completed=\(completed) inProgress=\(inProgress) pending=\(pending)")
 
         // When tasks are completed, Claude Code deletes the JSON files and writes
         // a .highwatermark file containing the total task count. Account for
@@ -525,20 +530,27 @@ final class ClaudeSessionDetector {
         if let hwStr = try? String(contentsOfFile: hwPath, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines),
            let hwTotal = Int(hwStr), hwTotal > total {
             let cleanedUp = hwTotal - total
+            Logger.info("readTaskSummary(\(sessionId)): highwatermark=\(hwTotal), adding \(cleanedUp) cleaned-up tasks as completed")
             completed += cleanedUp
             total = hwTotal
         }
 
         guard total > 0 else { return nil }
+        Logger.info("readTaskSummary(\(sessionId)): final total=\(total) completed=\(completed) inProgress=\(inProgress) pending=\(pending)")
         return TaskSummary(total: total, completed: completed, inProgress: inProgress, pending: pending)
     }
 
     private func readTasksFromDirectory(_ dir: String, sessionId: String?, total: inout Int, completed: inout Int, inProgress: inout Int, pending: inout Int) {
         let fm = FileManager.default
-        guard let files = try? fm.contentsOfDirectory(atPath: dir) else { return }
+        guard let files = try? fm.contentsOfDirectory(atPath: dir) else {
+            Logger.info("readTasksFromDirectory: no directory at \(dir)")
+            return
+        }
 
+        let dirName = (dir as NSString).lastPathComponent
         for file in files where file.hasSuffix(".json") {
             if let sid = sessionId, !file.hasPrefix(sid) { continue }
+            Logger.info("readTasksFromDirectory(\(dirName)): processing \(file)")
 
             let path = (dir as NSString).appendingPathComponent(file)
             guard let data = fm.contents(atPath: path),
@@ -578,31 +590,47 @@ final class ClaudeSessionDetector {
 
         // Read from tasks/<sessionId>/*.json
         if let files = try? fm.contentsOfDirectory(atPath: sessionTasksDir) {
-            for file in files.sorted() where file.hasSuffix(".json") {
+            let jsonFiles = files.sorted().filter { $0.hasSuffix(".json") }
+            Logger.info("readTaskItems(\(sessionId)): found \(jsonFiles.count) json files in tasksDir")
+            for file in jsonFiles {
                 let path = (sessionTasksDir as NSString).appendingPathComponent(file)
                 if let item = parseTaskFile(path: path) {
+                    Logger.info("readTaskItems(\(sessionId)):   task '\(item.subject)' status=\(item.status)")
                     items.append(item)
                 }
             }
+        } else {
+            Logger.info("readTaskItems(\(sessionId)): no tasksDir at \(sessionTasksDir)")
         }
 
         // Read from todos/<sessionId>-*.json
         if let files = try? fm.contentsOfDirectory(atPath: todosDir) {
-            for file in files.sorted() where file.hasSuffix(".json") && file.hasPrefix(sessionId) {
+            let matching = files.sorted().filter { $0.hasSuffix(".json") && $0.hasPrefix(sessionId) }
+            Logger.info("readTaskItems(\(sessionId)): found \(matching.count) matching json files in todosDir")
+            for file in matching {
                 let path = (todosDir as NSString).appendingPathComponent(file)
                 if let data = fm.contents(atPath: path),
                    let json = try? JSONSerialization.jsonObject(with: data) {
                     if let tasks = json as? [[String: Any]] {
                         for task in tasks {
-                            if let item = parseTaskJSON(task) { items.append(item) }
+                            if let item = parseTaskJSON(task) {
+                                Logger.info("readTaskItems(\(sessionId)):   todo '\(item.subject)' status=\(item.status)")
+                                items.append(item)
+                            }
                         }
                     } else if let task = json as? [String: Any] {
-                        if let item = parseTaskJSON(task) { items.append(item) }
+                        if let item = parseTaskJSON(task) {
+                            Logger.info("readTaskItems(\(sessionId)):   todo '\(item.subject)' status=\(item.status)")
+                            items.append(item)
+                        }
                     }
                 }
             }
+        } else {
+            Logger.info("readTaskItems(\(sessionId)): no todosDir at \(todosDir)")
         }
 
+        Logger.info("readTaskItems(\(sessionId)): returning \(items.count) items total")
         return items
     }
 
@@ -615,7 +643,8 @@ final class ClaudeSessionDetector {
     }
 
     private func parseTaskJSON(_ json: [String: Any]) -> TaskItem? {
-        guard let subject = json["subject"] as? String else { return nil }
+        // tasks/ files use "subject", todos/ files use "content"
+        guard let subject = (json["subject"] as? String) ?? (json["content"] as? String) else { return nil }
         let id = (json["id"] as? String) ?? UUID().uuidString
         let description = json["description"] as? String
         let status = (json["status"] as? String) ?? "pending"
@@ -626,7 +655,8 @@ final class ClaudeSessionDetector {
     // MARK: - Transcript reading
 
     /// Reads the full conversation transcript from a JSONL file using streaming.
-    func readTranscript(jsonlPath: String) -> [TranscriptMessage] {
+    /// The optional `onProgress` callback reports 0.0–1.0 based on bytes read.
+    func readTranscript(jsonlPath: String, onProgress: ((Double) -> Void)? = nil) -> [TranscriptMessage] {
         guard let handle = FileHandle(forReadingAtPath: jsonlPath) else {
             Logger.warning("readTranscript: cannot open \(jsonlPath)")
             return []
@@ -640,6 +670,7 @@ final class ClaudeSessionDetector {
         var messages: [TranscriptMessage] = []
         var linesRead = 0
         var linesSkipped = 0
+        var bytesRead: UInt64 = 0
         var buffer = ""
 
         // Read in chunks and process line by line.
@@ -649,6 +680,10 @@ final class ClaudeSessionDetector {
             if data.isEmpty { break }
             guard let chunk = String(data: data, encoding: .utf8) else { continue }
             buffer += chunk
+            bytesRead += UInt64(data.count)
+            if fileSize > 0 {
+                onProgress?(Double(bytesRead) / Double(fileSize))
+            }
 
             // Process complete lines.
             while let newlineRange = buffer.range(of: "\n") {

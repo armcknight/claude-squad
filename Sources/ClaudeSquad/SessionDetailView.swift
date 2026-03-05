@@ -197,16 +197,51 @@ struct SessionDetailView: View {
 
     private var transcriptSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Transcript")
-                .font(.headline)
+            HStack {
+                Text("Transcript")
+                    .font(.headline)
+                if !session.transcript.isEmpty {
+                    Text("(\(session.transcript.count) messages)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
 
             if session.transcript.isEmpty {
-                Text("Loading transcript...")
-                    .foregroundStyle(.secondary)
-                    .font(.caption)
+                if let state = monitor.transcriptLoadState[session.id] {
+                    switch state {
+                    case .loading(let progress):
+                        VStack(spacing: 4) {
+                            ProgressView(value: progress)
+                            Text("Loading… \(Int(progress * 100))%")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        .onAppear {
+                            Logger.info("TranscriptView: showing progress bar at \(Int(progress * 100))% for \(session.id)")
+                        }
+                    case .parsing:
+                        HStack(spacing: 8) {
+                            ProgressView()
+                                .controlSize(.small)
+                            Text("Parsing…")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        .onAppear {
+                            Logger.info("TranscriptView: showing parsing spinner for \(session.id)")
+                        }
+                    }
+                } else {
+                    ProgressView()
+                        .controlSize(.small)
+                        .onAppear {
+                            Logger.info("TranscriptView: showing default spinner (no load state) for \(session.id)")
+                        }
+                }
             } else {
                 LazyVStack(alignment: .leading, spacing: 8) {
-                    ForEach(session.transcript) { message in
+                    ForEach(session.transcript.reversed()) { message in
                         transcriptBubble(message)
                     }
                 }
