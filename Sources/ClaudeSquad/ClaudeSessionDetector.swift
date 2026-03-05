@@ -625,79 +625,142 @@ final class ClaudeSessionDetector {
 
     // MARK: - Transcript reading
 
-    /// How many tail lines to read for the transcript.
-    /// We read more lines than we display because many are progress/system lines that get filtered.
-    private let transcriptTailLineCount = 200
-
-    /// Reads the most recent conversation messages from a JSONL file using tail reading.
+    /// Reads the full conversation transcript from a JSONL file using streaming.
     func readTranscript(jsonlPath: String) -> [TranscriptMessage] {
-        let tailLines = readTailLines(filePath: jsonlPath, lineCount: transcriptTailLineCount)
-        if tailLines.isEmpty {
-            Logger.debug("readTranscript: no tail lines from \(jsonlPath)")
+        guard let handle = FileHandle(forReadingAtPath: jsonlPath) else {
+            Logger.warning("readTranscript: cannot open \(jsonlPath)")
             return []
         }
+        defer { handle.closeFile() }
+
+        let fileSize = handle.seekToEndOfFile()
+        handle.seek(toFileOffset: 0)
+        Logger.info("readTranscript: reading \(fileSize) bytes from \((jsonlPath as NSString).lastPathComponent)")
 
         var messages: [TranscriptMessage] = []
+        var linesRead = 0
+        var linesSkipped = 0
+        var buffer = ""
 
-        for line in tailLines {
-            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
-            if trimmed.isEmpty { continue }
+        // Read in chunks and process line by line.
+        let readChunkSize = 65536
+        while true {
+            let data = handle.readData(ofLength: readChunkSize)
+            if data.isEmpty { break }
+            guard let chunk = String(data: data, encoding: .utf8) else { continue }
+            buffer += chunk
 
-            guard let lineData = trimmed.data(using: .utf8),
-                  let json = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any] else {
-                continue
-            }
+            // Process complete lines.
+            while let newlineRange = buffer.range(of: "\n") {
+                let line = String(buffer[buffer.startIndex..<newlineRange.lowerBound])
+                buffer = String(buffer[newlineRange.upperBound...])
 
-            let type = json["type"] as? String
-            // Skip non-message types
-            if type == "file-history-snapshot" || type == "progress" || type == "system"
-                || type == "queue-operation" {
-                continue
-            }
+                let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+                if trimmed.isEmpty { continue }
+                linesRead += 1
 
-            guard let message = json["message"] as? [String: Any],
-                  let role = message["role"] as? String else {
-                continue
-            }
+                // Fast pre-filter: skip known non-message types without JSON parsing.
+                if trimmed.contains("\"progress\"") && !trimmed.contains("\"role\"") {
+                    linesSkipped += 1
+                    continue
+                }
+                if trimmed.contains("\"file-history-snapshot\"") || trimmed.contains("\"queue-operation\"") {
+                    linesSkipped += 1
+                    continue
+                }
 
-            let uuid = (json["uuid"] as? String) ?? UUID().uuidString
-            let timestamp = parseTimestamp(json["timestamp"] as? String)
+                guard let lineData = trimmed.data(using: .utf8),
+                      let json = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any] else {
+                    continue
+                }
 
-            var textParts: [String] = []
-            var toolCalls: [ToolCallSummary] = []
+                let type = json["type"] as? String
+                if type == "progress" || type == "system" || type == "file-history-snapshot"
+                    || type == "queue-operation" {
+                    linesSkipped += 1
+                    continue
+                }
 
-            if let contentStr = message["content"] as? String {
-                let cleaned = contentStr.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !cleaned.isEmpty { textParts.append(cleaned) }
-            } else if let contentArray = message["content"] as? [[String: Any]] {
-                for block in contentArray {
-                    let blockType = block["type"] as? String
-                    if blockType == "text", let text = block["text"] as? String {
-                        let cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
-                        if !cleaned.isEmpty { textParts.append(cleaned) }
-                    } else if blockType == "tool_use" {
-                        let name = block["name"] as? String ?? "unknown"
-                        let summary = toolCallSummary(name: name, input: block["input"] as? [String: Any])
-                        toolCalls.append(ToolCallSummary(name: name, summary: summary))
-                    } else if blockType == "tool_result" {
-                        continue
+                guard let message = json["message"] as? [String: Any],
+                      let role = message["role"] as? String else {
+                    continue
+                }
+
+                let uuid = (json["uuid"] as? String) ?? UUID().uuidString
+                let timestamp = parseTimestamp(json["timestamp"] as? String)
+
+                var textParts: [String] = []
+                var toolCalls: [ToolCallSummary] = []
+
+                if let contentStr = message["content"] as? String {
+                    let cleaned = contentStr.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !cleaned.isEmpty { textParts.append(cleaned) }
+                } else if let contentArray = message["content"] as? [[String: Any]] {
+                    for block in contentArray {
+                        let blockType = block["type"] as? String
+                        if blockType == "text", let text = block["text"] as? String {
+                            let cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                            if !cleaned.isEmpty { textParts.append(cleaned) }
+                        } else if blockType == "tool_use" {
+                            let name = block["name"] as? String ?? "unknown"
+                            let summary = toolCallSummary(name: name, input: block["input"] as? [String: Any])
+                            toolCalls.append(ToolCallSummary(name: name, summary: summary))
+                        }
                     }
                 }
+
+                if textParts.isEmpty && toolCalls.isEmpty { continue }
+
+                let fullText = textParts.joined(separator: "\n\n")
+                messages.append(TranscriptMessage(
+                    id: uuid,
+                    role: role,
+                    text: fullText,
+                    timestamp: timestamp,
+                    toolCalls: toolCalls
+                ))
             }
-
-            if textParts.isEmpty && toolCalls.isEmpty { continue }
-
-            let fullText = textParts.joined(separator: "\n\n")
-            messages.append(TranscriptMessage(
-                id: uuid,
-                role: role,
-                text: fullText,
-                timestamp: timestamp,
-                toolCalls: toolCalls
-            ))
         }
 
-        Logger.debug("readTranscript: parsed \(messages.count) messages from \(tailLines.count) tail lines")
+        // Process any remaining content in buffer (last line without trailing newline).
+        let trimmed = buffer.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty {
+            linesRead += 1
+            if let lineData = trimmed.data(using: .utf8),
+               let json = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any],
+               let message = json["message"] as? [String: Any],
+               let role = message["role"] as? String {
+                let uuid = (json["uuid"] as? String) ?? UUID().uuidString
+                let timestamp = parseTimestamp(json["timestamp"] as? String)
+                var textParts: [String] = []
+                var toolCalls: [ToolCallSummary] = []
+                if let contentStr = message["content"] as? String {
+                    let cleaned = contentStr.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !cleaned.isEmpty { textParts.append(cleaned) }
+                } else if let contentArray = message["content"] as? [[String: Any]] {
+                    for block in contentArray {
+                        let blockType = block["type"] as? String
+                        if blockType == "text", let text = block["text"] as? String {
+                            let cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                            if !cleaned.isEmpty { textParts.append(cleaned) }
+                        } else if blockType == "tool_use" {
+                            let name = block["name"] as? String ?? "unknown"
+                            let summary = toolCallSummary(name: name, input: block["input"] as? [String: Any])
+                            toolCalls.append(ToolCallSummary(name: name, summary: summary))
+                        }
+                    }
+                }
+                if !textParts.isEmpty || !toolCalls.isEmpty {
+                    messages.append(TranscriptMessage(
+                        id: uuid, role: role,
+                        text: textParts.joined(separator: "\n\n"),
+                        timestamp: timestamp, toolCalls: toolCalls
+                    ))
+                }
+            }
+        }
+
+        Logger.info("readTranscript: \(messages.count) messages from \(linesRead) lines (\(linesSkipped) skipped)")
         return messages
     }
 

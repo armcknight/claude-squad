@@ -67,7 +67,8 @@ struct SessionListView: View {
                 }
             }
         } detail: {
-            if let session = selectedSession {
+            if let selected = selectedSession,
+               let session = monitor.sessions.first(where: { $0.id == selected.id }) {
                 SessionDetailView(session: session, monitor: monitor)
             } else {
                 ContentUnavailableView(
