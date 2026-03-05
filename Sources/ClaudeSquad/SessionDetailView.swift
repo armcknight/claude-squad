@@ -208,36 +208,26 @@ struct SessionDetailView: View {
             }
 
             if session.transcript.isEmpty {
-                if let state = monitor.transcriptLoadState[session.id] {
-                    switch state {
-                    case .loading(let progress):
-                        VStack(spacing: 4) {
-                            ProgressView(value: progress)
-                            Text("Loading… \(Int(progress * 100))%")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        .onAppear {
-                            Logger.info("TranscriptView: showing progress bar at \(Int(progress * 100))% for \(session.id)")
-                        }
-                    case .parsing:
-                        HStack(spacing: 8) {
-                            ProgressView()
-                                .controlSize(.small)
-                            Text("Parsing…")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        .onAppear {
-                            Logger.info("TranscriptView: showing parsing spinner for \(session.id)")
-                        }
+                if case .parsing = monitor.transcriptLoadState[session.id] {
+                    HStack(spacing: 8) {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text("Parsing…")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                 } else {
-                    ProgressView()
-                        .controlSize(.small)
-                        .onAppear {
-                            Logger.info("TranscriptView: showing default spinner (no load state) for \(session.id)")
-                        }
+                    // Show progress bar for loading state or initial state (before first update arrives)
+                    let progress: Double = {
+                        if case .loading(let p) = monitor.transcriptLoadState[session.id] { return p }
+                        return 0.0
+                    }()
+                    VStack(spacing: 4) {
+                        ProgressView(value: progress)
+                        Text("Loading… \(Int(progress * 100))%")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             } else {
                 LazyVStack(alignment: .leading, spacing: 8) {
