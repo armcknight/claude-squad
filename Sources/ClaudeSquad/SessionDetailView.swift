@@ -4,6 +4,7 @@ import SwiftUI
 struct SessionDetailView: View {
     let session: ClaudeSession
     let monitor: SessionMonitor
+    @ObservedObject var transcriptLoader: TranscriptLoader
 
     var body: some View {
         ScrollView {
@@ -130,8 +131,10 @@ struct SessionDetailView: View {
             }
             .padding()
         }
-        .onAppear {
-            monitor.loadTranscript(for: session.id)
+        .task {
+            if let jsonlPath = session.jsonlPath {
+                await transcriptLoader.loadIfNeeded(sessionId: session.id, jsonlPath: jsonlPath)
+            }
         }
     }
 
@@ -208,7 +211,7 @@ struct SessionDetailView: View {
             }
 
             if session.transcript.isEmpty {
-                if case .parsing = monitor.transcriptLoadState[session.id] {
+                if case .parsing = transcriptLoader.loadStates[session.id] {
                     HStack(spacing: 8) {
                         ProgressView()
                             .controlSize(.small)
@@ -219,7 +222,7 @@ struct SessionDetailView: View {
                 } else {
                     // Show progress bar for loading state or initial state (before first update arrives)
                     let progress: Double = {
-                        if case .loading(let p) = monitor.transcriptLoadState[session.id] { return p }
+                        if case .loading(let p) = transcriptLoader.loadStates[session.id] { return p }
                         return 0.0
                     }()
                     VStack(spacing: 4) {

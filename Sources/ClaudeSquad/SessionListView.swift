@@ -69,7 +69,7 @@ struct SessionListView: View {
         } detail: {
             if let selected = selectedSession,
                let session = monitor.sessions.first(where: { $0.id == selected.id }) {
-                SessionDetailView(session: session, monitor: monitor)
+                SessionDetailView(session: session, monitor: monitor, transcriptLoader: monitor.transcriptLoader)
             } else {
                 ContentUnavailableView(
                     "Select a Session",
