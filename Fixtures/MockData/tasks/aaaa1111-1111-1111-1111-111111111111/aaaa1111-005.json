@@ -1,0 +1,6 @@
+{
+    "id": "task-005",
+    "subject": "Add biometric unlock",
+    "description": "Face ID / Touch ID support",
+    "status": "pending"
+}

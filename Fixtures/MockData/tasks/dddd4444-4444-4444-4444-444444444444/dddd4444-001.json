@@ -1,0 +1,6 @@
+{
+    "id": "task-006",
+    "subject": "Audit color usage",
+    "description": "Find all hardcoded colors",
+    "status": "completed"
+}

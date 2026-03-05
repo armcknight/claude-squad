@@ -6,6 +6,15 @@ final class ClaudeSessionDetector {
 
     static let shared = ClaudeSessionDetector()
 
+    #if DEBUG
+    /// Override to point at a different base directory (e.g. for mock data).
+    var basePath: String?
+
+    /// JSONL paths to touch before each detection cycle so they appear "fresh".
+    /// Used by mock mode to keep running sessions from going stale.
+    var runningFixturePaths: [String] = []
+    #endif
+
     /// How many lines to read from the tail of each JSONL file.
     private let tailLineCount = 20
 
@@ -33,6 +42,14 @@ final class ClaudeSessionDetector {
 
     /// Detects all active Claude sessions. Called each poll cycle.
     func detectSessions() throws -> [ClaudeSession] {
+        #if DEBUG
+        // Touch fixture files that should appear "fresh" for running status.
+        for path in runningFixturePaths {
+            try? FileManager.default.setAttributes(
+                [.modificationDate: Date()], ofItemAtPath: path)
+        }
+        #endif
+
         let claudeDir = claudeBasePath()
         let projectsDir = (claudeDir as NSString).appendingPathComponent("projects")
         Logger.info("detectSessions() START — claudeDir=\(claudeDir)")
@@ -82,6 +99,9 @@ final class ClaudeSessionDetector {
     // MARK: - Path helpers
 
     func claudeBasePath() -> String {
+        #if DEBUG
+        if let basePath { return basePath }
+        #endif
         let home = NSHomeDirectory()
         return (home as NSString).appendingPathComponent(".claude")
     }

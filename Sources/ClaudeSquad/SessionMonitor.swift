@@ -33,8 +33,41 @@ final class SessionMonitor: ObservableObject {
     init(detector: ClaudeSessionDetector = .shared, refreshInterval: TimeInterval = 3) {
         self.detector = detector
         self.refreshInterval = refreshInterval
-        self.transcriptLoader =  TranscriptLoader(detector: detector)
+        self.transcriptLoader = TranscriptLoader(detector: detector)
     }
+
+    #if DEBUG
+    /// Creates a monitor that reads from bundled fixture data instead of ~/.claude.
+    /// Files whose names contain "running" session IDs are touched each cycle
+    /// so the detector sees them as fresh (status = running instead of interrupted).
+    static func mock() -> SessionMonitor {
+        let detector = ClaudeSessionDetector()
+        guard let mockBase = Bundle.main.path(forResource: "MockData", ofType: nil, inDirectory: "Fixtures") else {
+            Logger.warning("MockData not found in bundle")
+            return SessionMonitor(detector: detector)
+        }
+        detector.basePath = mockBase
+
+        // Find JSONL files that should stay "fresh" (running sessions end with
+        // thinking blocks or recent tool_use). Touch them so mod date stays current.
+        let runningSessionIds = ["dddd4444", "eeee5555"] // dark-mode, button-variants
+        let projectsDir = (mockBase as NSString).appendingPathComponent("projects")
+        if let dirs = try? FileManager.default.contentsOfDirectory(atPath: projectsDir) {
+            for dir in dirs {
+                let fullDir = (projectsDir as NSString).appendingPathComponent(dir)
+                if let files = try? FileManager.default.contentsOfDirectory(atPath: fullDir) {
+                    for file in files where file.hasSuffix(".jsonl") {
+                        if runningSessionIds.contains(where: { file.hasPrefix($0) }) {
+                            let path = (fullDir as NSString).appendingPathComponent(file)
+                            detector.runningFixturePaths.append(path)
+                        }
+                    }
+                }
+            }
+        }
+        return SessionMonitor(detector: detector)
+    }
+    #endif
 
     // MARK: - Lifecycle
 

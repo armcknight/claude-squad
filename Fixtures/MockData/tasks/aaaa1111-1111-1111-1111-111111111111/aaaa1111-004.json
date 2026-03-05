@@ -1,0 +1,6 @@
+{
+    "id": "task-004",
+    "subject": "Write authentication tests",
+    "description": "Unit tests for auth manager",
+    "status": "in_progress"
+}

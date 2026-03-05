@@ -1,0 +1,4 @@
+{"type":"user","cwd":"/Users/dev/Code/personal/blog","sessionId":"iiii9999-9999-9999-9999-999999999999","gitBranch":"post/claude-squad-launch","message":{"role":"user","content":"help me write a blog post about launching Claude Squad"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"I'll draft a blog post about Claude Squad. Let me look at your existing post format first."},{"type":"tool_use","id":"tool1","name":"Read","input":{"file_path":"_posts/2024-01-15-hello-world.md"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tool1","content":"---\ntitle: Hello World\n---\nWelcome to my blog..."}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"I've drafted the blog post following your existing format. It covers the motivation (managing multiple Claude sessions), features, and a quick-start guide. Let me know if you'd like any changes!"}]}}

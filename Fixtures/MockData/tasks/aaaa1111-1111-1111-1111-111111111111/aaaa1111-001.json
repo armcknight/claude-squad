@@ -1,0 +1,6 @@
+{
+    "id": "task-001",
+    "subject": "Add login screen UI",
+    "description": "Create SwiftUI view with email/password fields",
+    "status": "completed"
+}

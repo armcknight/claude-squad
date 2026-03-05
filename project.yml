@@ -20,6 +20,7 @@ configFiles:
 
 fileGroups:
   - config
+  - Fixtures
   - README.md
   - Makefile
   - Brewfile
@@ -34,6 +35,12 @@ targets:
     deploymentTarget: "14.0"
     sources:
       - Sources/ClaudeSquad
+      - path: Fixtures
+        type: folder
+        buildPhase:
+          copyFiles:
+            destination: resources
+            subpath: ""
     dependencies:
       - package: SwiftyBeaver
     configFiles:
@@ -58,6 +65,8 @@ schemes:
         ClaudeSquad: all
     run:
       config: Debug
+      commandLineArguments:
+        "--mock": false
     test:
       config: Debug
       targets:

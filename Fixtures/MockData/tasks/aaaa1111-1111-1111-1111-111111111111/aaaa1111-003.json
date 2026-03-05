@@ -1,0 +1,6 @@
+{
+    "id": "task-003",
+    "subject": "Add keychain storage",
+    "description": "Securely store auth tokens",
+    "status": "completed"
+}

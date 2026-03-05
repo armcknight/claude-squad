@@ -4,7 +4,14 @@ import SwiftUI
 @objc final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var menuBarController: MenuBarController?
-    private let monitor = SessionMonitor()
+    private let monitor: SessionMonitor = {
+        #if DEBUG
+        if CommandLine.arguments.contains("--mock") {
+            return SessionMonitor.mock()
+        }
+        #endif
+        return SessionMonitor()
+    }()
     private var window: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {

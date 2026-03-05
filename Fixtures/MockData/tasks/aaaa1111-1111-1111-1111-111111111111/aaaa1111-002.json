@@ -1,0 +1,6 @@
+{
+    "id": "task-002",
+    "subject": "Implement OAuth flow",
+    "description": "Add Google and Apple sign-in support",
+    "status": "completed"
+}

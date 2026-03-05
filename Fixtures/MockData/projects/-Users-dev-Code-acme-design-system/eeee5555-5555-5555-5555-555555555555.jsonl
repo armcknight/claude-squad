@@ -1,0 +1,6 @@
+{"type":"user","cwd":"/Users/dev/Code/acme/design-system","sessionId":"eeee5555-5555-5555-5555-555555555555","gitBranch":"feat/button-variants","message":{"role":"user","content":"add destructive and ghost button style variants to the design system"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"I'll add the new button variants. Let me start with the destructive style."},{"type":"tool_use","id":"tool1","name":"Edit","input":{"file_path":"Sources/Components/Button.swift"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tool1","content":"File edited successfully"}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Destructive button style added. Now implementing the ghost button variant."},{"type":"tool_use","id":"tool2","name":"Edit","input":{"file_path":"Sources/Components/Button.swift"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tool2","content":"File edited successfully"}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"thinking","text":"Now I need to update the Storybook examples to showcase both new variants..."}]}}
