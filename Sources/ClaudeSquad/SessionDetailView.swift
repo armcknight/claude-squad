@@ -136,6 +136,11 @@ struct SessionDetailView: View {
                 transcriptLoader.loadIfNeeded(sessionId: session.id, jsonlPath: jsonlPath)
             }
         }
+        .onChange(of: session.id) { _, _ in
+            if let jsonlPath = session.jsonlPath {
+                transcriptLoader.loadIfNeeded(sessionId: session.id, jsonlPath: jsonlPath)
+            }
+        }
     }
 
     // MARK: - Task list
