@@ -163,77 +163,91 @@ struct SessionListView: View {
         var children: [PathTreeNode]
     }
 
-    /// Builds a tree of sessions grouped by common ancestor directories.
-    private func buildPathTree(sessions: [ClaudeSession]) -> [PathTreeNode] {
-        // Group sessions by parent directory.
-        let grouped = Dictionary(grouping: sessions) { session in
-            (session.projectPath as NSString).deletingLastPathComponent
-        }
+    /// Mutable trie node used during tree construction.
+    private class TrieNode {
+        var children: [String: TrieNode] = [:]
+        var sessions: [ClaudeSession] = []
+    }
 
-        // For each parent directory, create a node.
-        var nodes: [PathTreeNode] = []
-        for (parentPath, sessionsInDir) in grouped.sorted(by: { $0.key < $1.key }) {
-            if sessionsInDir.count == 1 {
-                // Single session — show as a leaf with its full abbreviated path.
-                let session = sessionsInDir[0]
-                nodes.append(PathTreeNode(
-                    fullPath: session.projectPath,
-                    displayLabel: session.displayName,
-                    sessions: [session],
-                    children: []
-                ))
-            } else {
-                // Multiple sessions share this parent — create a group node.
-                let node = PathTreeNode(
-                    fullPath: parentPath,
-                    displayLabel: abbreviatePath(parentPath),
-                    sessions: sessionsInDir.sorted(),
-                    children: []
-                )
-                nodes.append(node)
+    /// Builds a directory tree from session paths using a trie.
+    /// Sessions at /a/b/x and /a/b/c/y will produce:
+    ///   /a/b/
+    ///     x (leaf)
+    ///     c/
+    ///       y (leaf)
+    private func buildPathTree(sessions: [ClaudeSession]) -> [PathTreeNode] {
+        let root = TrieNode()
+
+        for session in sessions {
+            var components = (session.projectPath as NSString).pathComponents
+            // Replace home directory prefix with ~
+            let homeComponents = (NSHomeDirectory() as NSString).pathComponents
+            if components.starts(with: homeComponents) {
+                components = ["~"] + Array(components.dropFirst(homeComponents.count))
+            }
+            // Remove leading "/"
+            if components.first == "/" { components.removeFirst() }
+
+            // Walk the trie, creating nodes as needed. The last component
+            // is the session's project directory — attach the session there.
+            var current = root
+            for (i, component) in components.enumerated() {
+                if i == components.count - 1 {
+                    // Leaf: attach session
+                    if current.children[component] == nil {
+                        current.children[component] = TrieNode()
+                    }
+                    current.children[component]!.sessions.append(session)
+                } else {
+                    if current.children[component] == nil {
+                        current.children[component] = TrieNode()
+                    }
+                    current = current.children[component]!
+                }
             }
         }
 
-        // Merge nodes that share a common ancestor prefix.
-        return mergeCommonPrefixes(nodes)
+        // Convert trie to display nodes, collapsing single-child chains.
+        return convertTrieChildren(root, parentPath: "")
     }
 
-    /// Merges leaf nodes that share a common parent into directory groups.
-    /// For example, if we have individual leaves under the same grandparent,
-    /// they get grouped together.
-    private func mergeCommonPrefixes(_ nodes: [PathTreeNode]) -> [PathTreeNode] {
-        guard nodes.count > 1 else { return nodes }
-
-        // Group nodes by their parent directory.
-        let grouped = Dictionary(grouping: nodes) { node in
-            (node.fullPath as NSString).deletingLastPathComponent
-        }
-
+    /// Converts trie children into PathTreeNode array, collapsing chains of
+    /// single-child directories with no sessions into one combined label.
+    private func convertTrieChildren(_ node: TrieNode, parentPath: String) -> [PathTreeNode] {
         var result: [PathTreeNode] = []
-        for (parentPath, nodesInParent) in grouped.sorted(by: { $0.key < $1.key }) {
-            if nodesInParent.count == 1 {
-                result.append(nodesInParent[0])
+
+        for (component, child) in node.children.sorted(by: { $0.key < $1.key }) {
+            let fullPath = parentPath.isEmpty ? component : parentPath + "/" + component
+
+            // Collapse single-child chains: if this node has exactly one child
+            // and no sessions, merge it with the child's label.
+            var current = child
+            var label = component
+            var currentPath = fullPath
+            while current.sessions.isEmpty && current.children.count == 1 {
+                let (nextComponent, nextChild) = current.children.first!
+                label += "/" + nextComponent
+                currentPath += "/" + nextComponent
+                current = nextChild
+            }
+
+            if current.sessions.count == 1 && current.children.isEmpty {
+                // Pure leaf: single session, no subdirectories.
+                result.append(PathTreeNode(
+                    fullPath: currentPath,
+                    displayLabel: label,
+                    sessions: current.sessions,
+                    children: []
+                ))
             } else {
-                // Multiple nodes share a parent — group them.
-                let allSingleLeaves = nodesInParent.allSatisfy { $0.children.isEmpty && $0.sessions.count == 1 }
-                if allSingleLeaves {
-                    // All are single-session leaves — combine into one directory node.
-                    let allSessions = nodesInParent.flatMap(\.sessions).sorted()
-                    result.append(PathTreeNode(
-                        fullPath: parentPath,
-                        displayLabel: abbreviatePath(parentPath),
-                        sessions: allSessions,
-                        children: []
-                    ))
-                } else {
-                    // Mix of groups and leaves — make a parent with children.
-                    result.append(PathTreeNode(
-                        fullPath: parentPath,
-                        displayLabel: abbreviatePath(parentPath),
-                        sessions: [],
-                        children: nodesInParent
-                    ))
-                }
+                // Directory node: has multiple sessions and/or subdirectories.
+                let childNodes = convertTrieChildren(current, parentPath: currentPath)
+                result.append(PathTreeNode(
+                    fullPath: currentPath,
+                    displayLabel: label,
+                    sessions: current.sessions.sorted(),
+                    children: childNodes
+                ))
             }
         }
 
