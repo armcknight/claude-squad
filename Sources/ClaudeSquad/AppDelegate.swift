@@ -11,9 +11,12 @@ import UserNotifications
     private let errorReporter: ErrorReporter
     private let analyticsProvider: AnalyticsProvider
 
+    private let loginItemManager = LoginItemManager()
+    private let globalHotkey = GlobalHotkey()
     private let detector: ClaudeSessionDetector
     private let monitor: SessionMonitor
     private var window: NSWindow?
+    private var settingsWindow: NSWindow?
 
     override init() {
         let keys = ArkanaKeys.Global()
@@ -74,8 +77,10 @@ import UserNotifications
         // Show the app in the Dock and App Switcher.
         NSApp.setActivationPolicy(.regular)
 
+        setupMainMenu()
         setupWindow()
         setupNotificationHandler()
+        setupGlobalHotkey()
         monitor.start()
 
         analyticsProvider.track(event: AnalyticsEvent.appLaunched.rawValue, properties: nil)
@@ -129,8 +134,78 @@ import UserNotifications
     }
 
     private func showWindow() {
+        NSRunningApplication.current.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
         window?.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    // MARK: - Menu
+
+    private func setupMainMenu() {
+        let mainMenu = NSMenu()
+
+        // App menu
+        let appMenuItem = NSMenuItem()
+        let appMenu = NSMenu()
+        appMenu.addItem(withTitle: "About Claude Squad", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        appMenu.addItem(.separator())
+        let settingsItem = NSMenuItem(title: "Settings…", action: #selector(showSettings), keyEquivalent: ",")
+        settingsItem.target = self
+        appMenu.addItem(settingsItem)
+        appMenu.addItem(.separator())
+        appMenu.addItem(withTitle: "Quit Claude Squad", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        appMenuItem.submenu = appMenu
+        mainMenu.addItem(appMenuItem)
+
+        // File menu (for Close Window)
+        let fileMenuItem = NSMenuItem()
+        let fileMenu = NSMenu(title: "File")
+        fileMenu.addItem(withTitle: "Close Window", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+        fileMenuItem.submenu = fileMenu
+        mainMenu.addItem(fileMenuItem)
+
+        // Window menu
+        let windowMenuItem = NSMenuItem()
+        let windowMenu = NSMenu(title: "Window")
+        windowMenu.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
+        windowMenu.addItem(withTitle: "Zoom", action: #selector(NSWindow.performZoom(_:)), keyEquivalent: "")
+        windowMenu.addItem(.separator())
+        windowMenu.addItem(withTitle: "Bring All to Front", action: #selector(NSApplication.arrangeInFront(_:)), keyEquivalent: "")
+        windowMenuItem.submenu = windowMenu
+        mainMenu.addItem(windowMenuItem)
+        NSApp.windowsMenu = windowMenu
+
+        NSApp.mainMenu = mainMenu
+    }
+
+    @objc private func showSettings() {
+        if let settingsWindow, settingsWindow.isVisible {
+            settingsWindow.makeKeyAndOrderFront(nil)
+            return
+        }
+        let settingsView = SettingsView(loginItemManager: loginItemManager, globalHotkey: globalHotkey, logger: logger)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 400, height: 200),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.title = "Settings"
+        window.contentViewController = NSHostingController(rootView: settingsView)
+        window.center()
+        window.makeKeyAndOrderFront(nil)
+        self.settingsWindow = window
+    }
+
+    // MARK: - Global Hotkey
+
+    private func setupGlobalHotkey() {
+        globalHotkey.logger = logger
+        globalHotkey.register { [weak self] in
+            DispatchQueue.main.async {
+                self?.showWindow()
+            }
+        }
     }
 
     // MARK: - Notifications

@@ -10,11 +10,10 @@ A macOS app to help you keep up with multiple Claude sessions.
 - [x] Sentry SDK — crash reporting with swappable ErrorReporter protocol
 - [x] Analytics (Amplitude) — track feature usage with swappable AnalyticsProvider protocol
 - [x] Notifications — alert when a session transitions to "Needs Input"
-- [ ] Launch at Login toggle in settings
+- [x] Launch at Login toggle in settings
 - [ ] Onboarding flow — slides for permissions setup (Full Disk Access if needed, notifications)
-- [ ] Global hotkey — configurable shortcut to show/focus the window
-- [ ] Changelog window — show what's new after version upgrades
-- [ ] HTTP/log infrastructure improvements — log rotation, compression, size limits
+- [x] Global hotkey — configurable shortcut to show/focus the window (default ⌘⇧C)
+- [ ] Changelog section in settings — show what's new after version upgrades
 - [ ] Hardened runtime + notarization — for distribution outside the App Store
 - [ ] Fastlane — automate signing, notarization, and release
 - [ ] Clean/dirty git index, # unpushed commits, # commits available remotely per session
