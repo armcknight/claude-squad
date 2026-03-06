@@ -1,0 +1,51 @@
+name: Build and Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    name: Build
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: brew bundle
+
+      - name: Generate Xcode project
+        run: make xcode 2>/dev/null || xcodegen
+
+      - name: Build
+        run: |
+          set -o pipefail
+          xcodebuild -project ClaudeSquad.xcodeproj \
+            -scheme ClaudeSquad \
+            -configuration Debug \
+            -destination 'platform=macOS' \
+            build 2>&1 | xcbeautify
+
+  test:
+    name: Test
+    runs-on: macos-15
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: brew bundle
+
+      - name: Generate Xcode project
+        run: make xcode 2>/dev/null || xcodegen
+
+      - name: Run tests
+        run: |
+          set -o pipefail
+          xcodebuild -project ClaudeSquad.xcodeproj \
+            -scheme ClaudeSquad \
+            -configuration Debug \
+            -destination 'platform=macOS' \
+            test 2>&1 | xcbeautify

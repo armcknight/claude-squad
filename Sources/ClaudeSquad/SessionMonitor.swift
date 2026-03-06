@@ -16,6 +16,8 @@ final class SessionMonitor: ObservableObject {
     private let detector: ClaudeSessionDetector
     private let refreshInterval: TimeInterval
     private var timer: Timer?
+    weak var logger: Logger?
+    weak var analytics: AnalyticsProvider?
 
     /// Serial queue for refresh work to prevent concurrent access to mutable state.
     private let refreshQueue = DispatchQueue(label: "com.claudesquad.refresh", qos: .utility)
@@ -30,7 +32,7 @@ final class SessionMonitor: ObservableObject {
     /// Callback fired when a session transitions to a state needing attention.
     var onNeedsAttention: ((_ session: ClaudeSession) -> Void)?
 
-    init(detector: ClaudeSessionDetector = .shared, refreshInterval: TimeInterval = 3) {
+    init(detector: ClaudeSessionDetector, refreshInterval: TimeInterval) {
         self.detector = detector
         self.refreshInterval = refreshInterval
         self.transcriptLoader = TranscriptLoader(detector: detector)
@@ -40,17 +42,18 @@ final class SessionMonitor: ObservableObject {
     /// Creates a monitor that reads from bundled fixture data instead of ~/.claude.
     /// Files whose names contain "running" session IDs are touched each cycle
     /// so the detector sees them as fresh (status = running instead of interrupted).
-    static func mock() -> SessionMonitor {
+    static func mock(logger: Logger) -> SessionMonitor {
         let detector = ClaudeSessionDetector()
+        detector.logger = logger
         guard let mockBase = Bundle.main.path(forResource: "MockData", ofType: nil, inDirectory: "Fixtures") else {
-            Logger.warning("MockData not found in bundle")
-            return SessionMonitor(detector: detector)
+            logger.warning("MockData not found in bundle")
+            let monitor = SessionMonitor(detector: detector, refreshInterval: 3)
+            monitor.logger = logger
+            return monitor
         }
         detector.basePath = mockBase
 
-        // Find JSONL files that should stay "fresh" (running sessions end with
-        // thinking blocks or recent tool_use). Touch them so mod date stays current.
-        let runningSessionIds = ["dddd4444", "eeee5555"] // dark-mode, button-variants
+        let runningSessionIds = ["dddd4444", "eeee5555"]
         let projectsDir = (mockBase as NSString).appendingPathComponent("projects")
         if let dirs = try? FileManager.default.contentsOfDirectory(atPath: projectsDir) {
             for dir in dirs {
@@ -65,14 +68,19 @@ final class SessionMonitor: ObservableObject {
                 }
             }
         }
-        return SessionMonitor(detector: detector)
+        let monitor = SessionMonitor(detector: detector, refreshInterval: 3)
+        monitor.logger = logger
+        DispatchQueue.main.async {
+            monitor.transcriptLoader.logger = logger
+        }
+        return monitor
     }
     #endif
 
     // MARK: - Lifecycle
 
     func start() {
-        Logger.info("SessionMonitor starting with \(refreshInterval)s interval")
+        logger?.info("SessionMonitor starting with \(refreshInterval)s interval")
         refresh()
         timer = Timer.scheduledTimer(withTimeInterval: refreshInterval, repeats: true) { [weak self] _ in
             self?.refresh()
@@ -80,7 +88,7 @@ final class SessionMonitor: ObservableObject {
     }
 
     func stop() {
-        Logger.info("SessionMonitor stopping")
+        logger?.info("SessionMonitor stopping")
         timer?.invalidate()
         timer = nil
     }
@@ -88,16 +96,13 @@ final class SessionMonitor: ObservableObject {
     // MARK: - Refresh
 
     func refresh() {
-        Logger.info("SessionMonitor.refresh() called, dispatching to background")
+        logger?.info("SessionMonitor.refresh() called, dispatching to background")
         refreshQueue.async { [weak self] in
-            guard let self else {
-                Logger.warning("SessionMonitor.refresh(): self was deallocated")
-                return
-            }
-            Logger.info("SessionMonitor.refresh(): background block executing")
+            guard let self else { return }
+            self.logger?.info("SessionMonitor.refresh(): background block executing")
             do {
                 let detected = try self.detector.detectSessions()
-                Logger.info("Detector returned \(detected.count) session(s)")
+                logger?.info("Detector returned \(detected.count) session(s)")
                 let stabilized = self.stabilizeTimestamps(detected)
                 let sorted = stabilized.sorted()
                 DispatchQueue.main.async {
@@ -109,12 +114,12 @@ final class SessionMonitor: ObservableObject {
                     self.sessions = withTranscripts
                     self.lastError = nil
                     if withTranscripts.count != oldCount {
-                        Logger.info("Session count changed: \(oldCount) -> \(withTranscripts.count)")
+                        self.logger?.info("Session count changed: \(oldCount) -> \(withTranscripts.count)")
                     }
                 }
             } catch {
-                Logger.error("Session detection failed: \(error)")
-                Logger.error("Session detection error details: \(String(describing: error))")
+                logger?.error("Session detection failed: \(error)")
+                logger?.error("Session detection error details: \(String(describing: error))")
                 DispatchQueue.main.async {
                     self.lastError = error.localizedDescription
                 }
@@ -162,7 +167,7 @@ final class SessionMonitor: ObservableObject {
 
             // Notify if transitioned TO a waiting state from something else.
             if session.status.isWaiting && previousType != currentType {
-                Logger.info("Session \(session.displayName) transitioned to waiting (priority \(currentType))")
+                logger?.info("Session \(session.displayName) transitioned to waiting (priority \(currentType))")
                 onNeedsAttention?(session)
             }
 

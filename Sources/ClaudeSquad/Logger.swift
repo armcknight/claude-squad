@@ -1,21 +1,19 @@
 import Foundation
 import SwiftyBeaver
 
-public final class Logger {
-    public static let shared = Logger()
-
+final class Logger {
     private let log = SwiftyBeaver.self
     private var fileDestination: FileDestination?
 
-    public var defaultLogLevel: SwiftyBeaver.Level {
+    private let defaultLogLevel: SwiftyBeaver.Level = {
         #if DEBUG
         return .debug
         #else
         return .info
         #endif
-    }
+    }()
 
-    private init() {
+    init() {
         resetDestinations(minLevel: defaultLogLevel)
     }
 
@@ -48,31 +46,31 @@ public final class Logger {
         return dest
     }
 
-    // MARK: - Static convenience methods
+    // MARK: - Logging methods
 
-    public static func verbose(_ message: @autoclosure () -> Any, file: String = #file, function: String = #function, line: Int = #line) {
-        shared.log.verbose(message(), file: file, function: function, line: line)
+    func verbose(_ message: @autoclosure () -> Any, file: String = #file, function: String = #function, line: Int = #line) {
+        log.verbose(message(), file: file, function: function, line: line)
     }
 
-    public static func debug(_ message: @autoclosure () -> Any, file: String = #file, function: String = #function, line: Int = #line) {
-        shared.log.debug(message(), file: file, function: function, line: line)
+    func debug(_ message: @autoclosure () -> Any, file: String = #file, function: String = #function, line: Int = #line) {
+        log.debug(message(), file: file, function: function, line: line)
     }
 
-    public static func info(_ message: @autoclosure () -> Any, file: String = #file, function: String = #function, line: Int = #line) {
-        shared.log.info(message(), file: file, function: function, line: line)
+    func info(_ message: @autoclosure () -> Any, file: String = #file, function: String = #function, line: Int = #line) {
+        log.info(message(), file: file, function: function, line: line)
     }
 
-    public static func warning(_ message: @autoclosure () -> Any, file: String = #file, function: String = #function, line: Int = #line) {
-        shared.log.warning(message(), file: file, function: function, line: line)
+    func warning(_ message: @autoclosure () -> Any, file: String = #file, function: String = #function, line: Int = #line) {
+        log.warning(message(), file: file, function: function, line: line)
     }
 
-    public static func error(_ message: @autoclosure () -> Any, file: String = #file, function: String = #function, line: Int = #line) {
-        shared.log.error(message(), file: file, function: function, line: line)
+    func error(_ message: @autoclosure () -> Any, file: String = #file, function: String = #function, line: Int = #line) {
+        log.error(message(), file: file, function: function, line: line)
     }
 
     // MARK: - Log file access
 
-    public func getLogFileURL() -> URL? {
+    func getLogFileURL() -> URL? {
         fileDestination?.logFileURL
     }
 }

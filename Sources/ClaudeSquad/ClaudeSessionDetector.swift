@@ -4,7 +4,7 @@ import Foundation
 /// with running processes. Replaces the tmux-based detection approach.
 final class ClaudeSessionDetector {
 
-    static let shared = ClaudeSessionDetector()
+    weak var logger: Logger?
 
     #if DEBUG
     /// Override to point at a different base directory (e.g. for mock data).
@@ -52,16 +52,16 @@ final class ClaudeSessionDetector {
 
         let claudeDir = claudeBasePath()
         let projectsDir = (claudeDir as NSString).appendingPathComponent("projects")
-        Logger.info("detectSessions() START — claudeDir=\(claudeDir)")
+        logger?.info("detectSessions() START — claudeDir=\(claudeDir)")
 
         guard FileManager.default.fileExists(atPath: projectsDir) else {
-            Logger.info("No projects directory at \(projectsDir) — returning empty")
+            logger?.info("No projects directory at \(projectsDir) — returning empty")
             return []
         }
 
         // Step 1: Find all project directories and their most recent JSONL files.
         let projectJSONLFiles = findProjectJSONLFiles(projectsDir: projectsDir)
-        Logger.info("Found \(projectJSONLFiles.count) project JSONL file(s)")
+        logger?.info("Found \(projectJSONLFiles.count) project JSONL file(s)")
 
         // Step 2: Analyze each session, skipping unchanged files.
         var sessions: [ClaudeSession] = []
@@ -71,7 +71,7 @@ final class ClaudeSessionDetector {
                 if let attrs = try? FileManager.default.attributesOfItem(atPath: jsonlPath),
                    let modDate = attrs[.modificationDate] as? Date,
                    modDate == cached.modDate {
-                    Logger.debug("Skipping unchanged session: \(cached.session.displayName)")
+                    logger?.debug("Skipping unchanged session: \(cached.session.displayName)")
                     sessions.append(cached.session)
                     continue
                 }
@@ -92,7 +92,7 @@ final class ClaudeSessionDetector {
         firstLineCache = firstLineCache.filter { currentPaths.contains($0.key) }
         sessionCache = sessionCache.filter { currentPaths.contains($0.key) }
 
-        Logger.info("detectSessions() END — \(sessions.count) session(s): \(sessions.map { "\($0.displayName) [\($0.status)]" })")
+        logger?.info("detectSessions() END — \(sessions.count) session(s): \(sessions.map { "\($0.displayName) [\($0.status)]" })")
         return sessions
     }
 
@@ -112,10 +112,10 @@ final class ClaudeSessionDetector {
     func findProjectJSONLFiles(projectsDir: String) -> [String] {
         let fm = FileManager.default
         guard let projectDirs = try? fm.contentsOfDirectory(atPath: projectsDir) else {
-            Logger.info("Cannot list contents of \(projectsDir)")
+            logger?.info("Cannot list contents of \(projectsDir)")
             return []
         }
-        Logger.info("Project directories (\(projectDirs.count)): \(projectDirs)")
+        logger?.info("Project directories (\(projectDirs.count)): \(projectDirs)")
 
         var results: [String] = []
         for dir in projectDirs {
@@ -126,7 +126,7 @@ final class ClaudeSessionDetector {
             guard let files = try? fm.contentsOfDirectory(atPath: fullDir) else { continue }
             let jsonlFiles = files.filter { $0.hasSuffix(".jsonl") }
             if jsonlFiles.isEmpty {
-                Logger.debug("  \(dir): no .jsonl files")
+                logger?.debug("  \(dir): no .jsonl files")
                 continue
             }
 
@@ -142,7 +142,7 @@ final class ClaudeSessionDetector {
                 }
             }
             if let path = bestPath {
-                Logger.debug("  \(dir): selected \((path as NSString).lastPathComponent) (mod: \(bestDate!))")
+                logger?.debug("  \(dir): selected \((path as NSString).lastPathComponent) (mod: \(bestDate!))")
                 results.append(path)
             }
         }
@@ -160,25 +160,25 @@ final class ClaudeSessionDetector {
         // Get file modification date.
         guard let attrs = try? fm.attributesOfItem(atPath: jsonlPath),
               let lastModified = attrs[.modificationDate] as? Date else {
-            Logger.warning("Cannot read attributes for \(fileName)")
+            logger?.warning("Cannot read attributes for \(fileName)")
             return nil
         }
 
         // Read session metadata (cached).
         guard let meta = readFirstLineInfo(jsonlPath: jsonlPath) else {
-            Logger.debug("Cannot extract session metadata from \(fileName), skipping")
+            logger?.debug("Cannot extract session metadata from \(fileName), skipping")
             return nil
         }
 
         let cwd = meta.cwd
         let sessionId = meta.sessionId
-        Logger.debug("Analyzing session \(sessionId): cwd=\(cwd)")
+        logger?.debug("Analyzing session \(sessionId): cwd=\(cwd)")
 
         // Read tail lines to determine status.
         let tailLines = readTailLines(filePath: jsonlPath, lineCount: tailLineCount)
-        Logger.debug("  Read \(tailLines.count) tail lines")
+        logger?.debug("  Read \(tailLines.count) tail lines")
         let status = determineStatus(tailLines: tailLines, lastModified: lastModified)
-        Logger.debug("  Status: \(status)")
+        logger?.debug("  Status: \(status)")
 
         // Prefer git branch from JSONL metadata, fall back to .git/HEAD.
         let gitBranch = meta.gitBranch ?? readGitBranch(projectPath: cwd)
@@ -207,7 +207,7 @@ final class ClaudeSessionDetector {
         session.taskItems = taskItems
         session.pullRequestURL = prURL
         session.jsonlPath = jsonlPath
-        Logger.debug("  -> \(session.displayName) [\(status)]")
+        logger?.debug("  -> \(session.displayName) [\(status)]")
         return session
     }
 
@@ -222,7 +222,7 @@ final class ClaudeSessionDetector {
         }
 
         guard let handle = FileHandle(forReadingAtPath: jsonlPath) else {
-            Logger.debug("Cannot open \(jsonlPath) for reading")
+            logger?.debug("Cannot open \(jsonlPath) for reading")
             return nil
         }
         defer { handle.closeFile() }
@@ -255,7 +255,7 @@ final class ClaudeSessionDetector {
                 if trimmed.isEmpty { continue }
 
                 if let info = parseSessionMetadata(trimmed) {
-                    Logger.debug("Found session metadata on line \(linesScanned) (chunk \(chunkIndex)): id=\(info.sessionId), cwd=\(info.cwd), branch=\(info.gitBranch ?? "nil"), slug=\(info.slug ?? "nil")")
+                    logger?.debug("Found session metadata on line \(linesScanned) (chunk \(chunkIndex)): id=\(info.sessionId), cwd=\(info.cwd), branch=\(info.gitBranch ?? "nil"), slug=\(info.slug ?? "nil")")
                     firstLineCache[jsonlPath] = info
                     return info
                 }
@@ -267,7 +267,7 @@ final class ClaudeSessionDetector {
             accumulated = lines.last ?? ""
         }
 
-        Logger.debug("No session metadata found in first \(linesScanned) lines of \((jsonlPath as NSString).lastPathComponent)")
+        logger?.debug("No session metadata found in first \(linesScanned) lines of \((jsonlPath as NSString).lastPathComponent)")
         return nil
     }
 
@@ -355,7 +355,7 @@ final class ClaudeSessionDetector {
             let type = json["type"] as? String
             let messageRole = (json["message"] as? [String: Any])?["role"] as? String
 
-            Logger.debug("    tail line: type=\(type ?? "nil"), message.role=\(messageRole ?? "nil")")
+            logger?.debug("    tail line: type=\(type ?? "nil"), message.role=\(messageRole ?? "nil")")
 
             // Assistant message — analyze content blocks to determine waiting vs running.
             if type == "assistant" || messageRole == "assistant" {
@@ -368,7 +368,7 @@ final class ClaudeSessionDetector {
                 if let message = json["message"] as? [String: Any] {
                     if let contentStr = message["content"] as? String,
                        contentStr.contains("[Request interrupted by user") {
-                        Logger.debug("    -> interrupted (user interruption text)")
+                        logger?.debug("    -> interrupted (user interruption text)")
                         return .interrupted(lastActivity: lastModified)
                     }
                     if let contentArray = message["content"] as? [[String: Any]] {
@@ -378,13 +378,13 @@ final class ClaudeSessionDetector {
                                 if blockType == "text",
                                    let text = block["text"] as? String,
                                    text.contains("[Request interrupted by user") {
-                                    Logger.debug("    -> interrupted (user interruption text in content block)")
+                                    logger?.debug("    -> interrupted (user interruption text in content block)")
                                     return .interrupted(lastActivity: lastModified)
                                 }
                                 if blockType == "tool_result",
                                    let content = block["content"] as? String,
                                    content.contains("user doesn't want to proceed") {
-                                    Logger.debug("    -> interrupted (rejected tool use)")
+                                    logger?.debug("    -> interrupted (rejected tool use)")
                                     return .interrupted(lastActivity: lastModified)
                                 }
                             }
@@ -395,10 +395,10 @@ final class ClaudeSessionDetector {
                 // If file is stale, Claude stopped responding → interrupted.
                 let staleness = Date().timeIntervalSince(lastModified)
                 if staleness > 30 {
-                    Logger.debug("    -> interrupted (user message but file stale \(Int(staleness))s)")
+                    logger?.debug("    -> interrupted (user message but file stale \(Int(staleness))s)")
                     return .interrupted(lastActivity: lastModified)
                 }
-                Logger.debug("    -> running (user message, file fresh)")
+                logger?.debug("    -> running (user message, file fresh)")
                 return .running
             }
 
@@ -454,13 +454,13 @@ final class ClaudeSessionDetector {
             content = contentArray
         } else {
             // Plain text response with no structured content → waiting idle.
-            Logger.debug("    assistant message has no content blocks -> waitingIdle")
+            logger?.debug("    assistant message has no content blocks -> waitingIdle")
             return .waitingIdle(since: lastModified)
         }
 
         let blockTypes = content.compactMap { $0["type"] as? String }
         let lastBlockName = (content.last?["name"] as? String) ?? "(none)"
-        Logger.debug("    assistant content: \(content.count) blocks, types=\(blockTypes), lastTool=\(lastBlockName)")
+        logger?.debug("    assistant content: \(content.count) blocks, types=\(blockTypes), lastTool=\(lastBlockName)")
 
         // Check if the last content block is a tool_use.
         if let lastBlock = content.last,
@@ -469,7 +469,7 @@ final class ClaudeSessionDetector {
             let toolName = lastBlock["name"] as? String ?? ""
             if toolName == "AskUserQuestion" || toolName == "TodoWrite" || toolName == "ExitPlanMode" {
                 let question = extractQuestion(from: lastBlock)
-                Logger.debug("    -> waitingForQuestion (tool=\(toolName), question=\(question ?? "nil"))")
+                logger?.debug("    -> waitingForQuestion (tool=\(toolName), question=\(question ?? "nil"))")
                 return .waitingForQuestion(since: lastModified, question: question)
             }
             // If no tool_result follows this assistant tool_use AND the file is
@@ -477,22 +477,22 @@ final class ClaudeSessionDetector {
             if !toolResultFollows {
                 let staleness = Date().timeIntervalSince(lastModified)
                 if staleness > 3 {
-                    Logger.debug("    -> waitingForQuestion (tool_use \(toolName) pending approval, file stale \(Int(staleness))s)")
+                    logger?.debug("    -> waitingForQuestion (tool_use \(toolName) pending approval, file stale \(Int(staleness))s)")
                     return .waitingForQuestion(since: lastModified, question: "Approve \(toolName) tool use?")
                 }
             }
-            Logger.debug("    -> running (tool_use: \(toolName))")
+            logger?.debug("    -> running (tool_use: \(toolName))")
             return .running
         }
 
         // Has content blocks but last one is text → finished output, waiting idle.
         let hasTextBlock = content.contains { ($0["type"] as? String) == "text" }
         if hasTextBlock {
-            Logger.debug("    -> waitingIdle (text output, no pending tool)")
+            logger?.debug("    -> waitingIdle (text output, no pending tool)")
             return .waitingIdle(since: lastModified)
         }
 
-        Logger.debug("    -> running (no text, no tool_use)")
+        logger?.debug("    -> running (no text, no tool_use)")
         return .running
     }
 
@@ -537,11 +537,11 @@ final class ClaudeSessionDetector {
         var pending = 0
 
         readTasksFromDirectory(todosDir, sessionId: sessionId, total: &total, completed: &completed, inProgress: &inProgress, pending: &pending)
-        Logger.info("readTaskSummary(\(sessionId)): after todosDir: total=\(total) completed=\(completed) inProgress=\(inProgress) pending=\(pending)")
+        logger?.info("readTaskSummary(\(sessionId)): after todosDir: total=\(total) completed=\(completed) inProgress=\(inProgress) pending=\(pending)")
 
         let sessionTasksDir = (tasksDir as NSString).appendingPathComponent(sessionId)
         readTasksFromDirectory(sessionTasksDir, sessionId: nil, total: &total, completed: &completed, inProgress: &inProgress, pending: &pending)
-        Logger.info("readTaskSummary(\(sessionId)): after tasksDir: total=\(total) completed=\(completed) inProgress=\(inProgress) pending=\(pending)")
+        logger?.info("readTaskSummary(\(sessionId)): after tasksDir: total=\(total) completed=\(completed) inProgress=\(inProgress) pending=\(pending)")
 
         // When tasks are completed, Claude Code deletes the JSON files and writes
         // a .highwatermark file containing the total task count. Account for
@@ -550,27 +550,27 @@ final class ClaudeSessionDetector {
         if let hwStr = try? String(contentsOfFile: hwPath, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines),
            let hwTotal = Int(hwStr), hwTotal > total {
             let cleanedUp = hwTotal - total
-            Logger.info("readTaskSummary(\(sessionId)): highwatermark=\(hwTotal), adding \(cleanedUp) cleaned-up tasks as completed")
+            logger?.info("readTaskSummary(\(sessionId)): highwatermark=\(hwTotal), adding \(cleanedUp) cleaned-up tasks as completed")
             completed += cleanedUp
             total = hwTotal
         }
 
         guard total > 0 else { return nil }
-        Logger.info("readTaskSummary(\(sessionId)): final total=\(total) completed=\(completed) inProgress=\(inProgress) pending=\(pending)")
+        logger?.info("readTaskSummary(\(sessionId)): final total=\(total) completed=\(completed) inProgress=\(inProgress) pending=\(pending)")
         return TaskSummary(total: total, completed: completed, inProgress: inProgress, pending: pending)
     }
 
     private func readTasksFromDirectory(_ dir: String, sessionId: String?, total: inout Int, completed: inout Int, inProgress: inout Int, pending: inout Int) {
         let fm = FileManager.default
         guard let files = try? fm.contentsOfDirectory(atPath: dir) else {
-            Logger.info("readTasksFromDirectory: no directory at \(dir)")
+            logger?.info("readTasksFromDirectory: no directory at \(dir)")
             return
         }
 
         let dirName = (dir as NSString).lastPathComponent
         for file in files where file.hasSuffix(".json") {
             if let sid = sessionId, !file.hasPrefix(sid) { continue }
-            Logger.info("readTasksFromDirectory(\(dirName)): processing \(file)")
+            logger?.info("readTasksFromDirectory(\(dirName)): processing \(file)")
 
             let path = (dir as NSString).appendingPathComponent(file)
             guard let data = fm.contents(atPath: path),
@@ -611,22 +611,22 @@ final class ClaudeSessionDetector {
         // Read from tasks/<sessionId>/*.json
         if let files = try? fm.contentsOfDirectory(atPath: sessionTasksDir) {
             let jsonFiles = files.sorted().filter { $0.hasSuffix(".json") }
-            Logger.info("readTaskItems(\(sessionId)): found \(jsonFiles.count) json files in tasksDir")
+            logger?.info("readTaskItems(\(sessionId)): found \(jsonFiles.count) json files in tasksDir")
             for file in jsonFiles {
                 let path = (sessionTasksDir as NSString).appendingPathComponent(file)
                 if let item = parseTaskFile(path: path) {
-                    Logger.info("readTaskItems(\(sessionId)):   task '\(item.subject)' status=\(item.status)")
+                    logger?.info("readTaskItems(\(sessionId)):   task '\(item.subject)' status=\(item.status)")
                     items.append(item)
                 }
             }
         } else {
-            Logger.info("readTaskItems(\(sessionId)): no tasksDir at \(sessionTasksDir)")
+            logger?.info("readTaskItems(\(sessionId)): no tasksDir at \(sessionTasksDir)")
         }
 
         // Read from todos/<sessionId>-*.json
         if let files = try? fm.contentsOfDirectory(atPath: todosDir) {
             let matching = files.sorted().filter { $0.hasSuffix(".json") && $0.hasPrefix(sessionId) }
-            Logger.info("readTaskItems(\(sessionId)): found \(matching.count) matching json files in todosDir")
+            logger?.info("readTaskItems(\(sessionId)): found \(matching.count) matching json files in todosDir")
             for file in matching {
                 let path = (todosDir as NSString).appendingPathComponent(file)
                 if let data = fm.contents(atPath: path),
@@ -634,23 +634,23 @@ final class ClaudeSessionDetector {
                     if let tasks = json as? [[String: Any]] {
                         for task in tasks {
                             if let item = parseTaskJSON(task) {
-                                Logger.info("readTaskItems(\(sessionId)):   todo '\(item.subject)' status=\(item.status)")
+                                logger?.info("readTaskItems(\(sessionId)):   todo '\(item.subject)' status=\(item.status)")
                                 items.append(item)
                             }
                         }
                     } else if let task = json as? [String: Any] {
                         if let item = parseTaskJSON(task) {
-                            Logger.info("readTaskItems(\(sessionId)):   todo '\(item.subject)' status=\(item.status)")
+                            logger?.info("readTaskItems(\(sessionId)):   todo '\(item.subject)' status=\(item.status)")
                             items.append(item)
                         }
                     }
                 }
             }
         } else {
-            Logger.info("readTaskItems(\(sessionId)): no todosDir at \(todosDir)")
+            logger?.info("readTaskItems(\(sessionId)): no todosDir at \(todosDir)")
         }
 
-        Logger.info("readTaskItems(\(sessionId)): returning \(items.count) items total")
+        logger?.info("readTaskItems(\(sessionId)): returning \(items.count) items total")
         return items
     }
 
@@ -678,14 +678,14 @@ final class ClaudeSessionDetector {
     /// The optional `onProgress` callback reports 0.0–1.0 based on bytes read.
     func readTranscript(jsonlPath: String, onProgress: ((Double) -> Void)? = nil) -> [TranscriptMessage] {
         guard let handle = FileHandle(forReadingAtPath: jsonlPath) else {
-            Logger.warning("readTranscript: cannot open \(jsonlPath)")
+            logger?.warning("readTranscript: cannot open \(jsonlPath)")
             return []
         }
         defer { handle.closeFile() }
 
         let fileSize = handle.seekToEndOfFile()
         handle.seek(toFileOffset: 0)
-        Logger.info("readTranscript: reading \(fileSize) bytes from \((jsonlPath as NSString).lastPathComponent)")
+        logger?.info("readTranscript: reading \(fileSize) bytes from \((jsonlPath as NSString).lastPathComponent)")
 
         var messages: [TranscriptMessage] = []
         var linesRead = 0
@@ -815,7 +815,7 @@ final class ClaudeSessionDetector {
             }
         }
 
-        Logger.info("readTranscript: \(messages.count) messages from \(linesRead) lines (\(linesSkipped) skipped)")
+        logger?.info("readTranscript: \(messages.count) messages from \(linesRead) lines (\(linesSkipped) skipped)")
         return messages
     }
 

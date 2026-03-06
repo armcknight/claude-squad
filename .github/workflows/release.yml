@@ -1,0 +1,63 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version number (e.g. 1.0.0)'
+        required: true
+        type: string
+
+jobs:
+  release:
+    name: Build and Release
+    runs-on: macos-15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: brew bundle
+
+      - name: Generate Xcode project
+        run: make xcode 2>/dev/null || xcodegen
+
+      - name: Set version
+        run: |
+          sed -i '' "s/MARKETING_VERSION = .*/MARKETING_VERSION = ${{ inputs.version }}/" config/ClaudeSquad.xcconfig
+
+      - name: Build Release
+        run: |
+          set -o pipefail
+          xcodebuild -project ClaudeSquad.xcodeproj \
+            -scheme ClaudeSquad \
+            -configuration Release \
+            -destination 'platform=macOS' \
+            -archivePath build/ClaudeSquad.xcarchive \
+            archive 2>&1 | xcbeautify
+
+      - name: Export app
+        run: |
+          xcodebuild -exportArchive \
+            -archivePath build/ClaudeSquad.xcarchive \
+            -exportPath build/export \
+            -exportOptionsPlist config/ExportOptions.plist 2>&1 || true
+          # Fallback: copy from archive directly
+          if [ ! -d "build/export/ClaudeSquad.app" ]; then
+            mkdir -p build/export
+            cp -R "build/ClaudeSquad.xcarchive/Products/Applications/ClaudeSquad.app" build/export/
+          fi
+
+      - name: Create zip
+        run: |
+          cd build/export
+          ditto -c -k --keepParent ClaudeSquad.app ClaudeSquad-${{ inputs.version }}.zip
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ inputs.version }}
+          name: v${{ inputs.version }}
+          files: build/export/ClaudeSquad-${{ inputs.version }}.zip
+          generate_release_notes: true

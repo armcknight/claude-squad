@@ -20,8 +20,9 @@ final class TranscriptLoader: ObservableObject {
     private var transcriptModDates: [String: Date] = [:]
 
     private let detector: ClaudeSessionDetector
+    weak var logger: Logger?
 
-    nonisolated init(detector: ClaudeSessionDetector = .shared) {
+    nonisolated init(detector: ClaudeSessionDetector) {
         self.detector = detector
     }
 
@@ -43,11 +44,11 @@ final class TranscriptLoader: ObservableObject {
            let lastMod = transcriptModDates[sessionId],
            modDate == lastMod,
            cachedTranscripts[sessionId] != nil {
-            Logger.debug("TranscriptLoader: skipping unchanged file for \(sessionId)")
+            logger?.debug("TranscriptLoader: skipping unchanged file for \(sessionId)")
             return
         }
 
-        Logger.info("TranscriptLoader: loading \(sessionId)")
+        logger?.info("TranscriptLoader: loading \(sessionId)")
         loadStates[sessionId] = .loading(progress: 0.0)
 
         // Fire-and-forget detached task so it survives view recreation.
@@ -66,7 +67,7 @@ final class TranscriptLoader: ObservableObject {
 
             await MainActor.run {
                 guard let self else { return }
-                Logger.info("TranscriptLoader: parsed \(transcript.count) messages for \(sessionId)")
+                self.logger?.info("TranscriptLoader: parsed \(transcript.count) messages for \(sessionId)")
                 self.cachedTranscripts[sessionId] = transcript
                 if let modDate {
                     self.transcriptModDates[sessionId] = modDate

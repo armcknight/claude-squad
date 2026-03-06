@@ -4,6 +4,12 @@ packages:
   SwiftyBeaver:
     url: https://github.com/SwiftyBeaver/SwiftyBeaver
     version: 2.1.1
+  Sentry:
+    url: https://github.com/getsentry/sentry-cocoa
+    version: 8.44.0
+  AmplitudeSwift:
+    url: https://github.com/amplitude/Amplitude-Swift
+    version: 1.12.0
 
 options:
   bundleIdPrefix: com.armcknight
@@ -27,6 +33,7 @@ fileGroups:
   - project.yml
   - .gitignore
   - .claude
+  - .github
 
 targets:
   ClaudeSquad:
@@ -43,6 +50,8 @@ targets:
             subpath: ""
     dependencies:
       - package: SwiftyBeaver
+      - package: Sentry
+      - package: AmplitudeSwift
     configFiles:
       Debug: config/ClaudeSquad.xcconfig
       Release: config/ClaudeSquad.xcconfig

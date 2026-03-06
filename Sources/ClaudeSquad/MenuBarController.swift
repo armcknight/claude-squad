@@ -9,6 +9,7 @@ final class MenuBarController {
     private var statusItem: NSStatusItem!
     private let monitor: SessionMonitor
     private var cancellables = Set<AnyCancellable>()
+    weak var logger: Logger?
 
     /// Tracks which sessions we've already sent notifications for (to avoid duplicates).
     private var notifiedStates: [String: Int] = [:]
@@ -35,11 +36,11 @@ final class MenuBarController {
     }
 
     private func setupNotifications() {
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { granted, error in
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { [weak self] granted, error in
             if let error = error {
-                Logger.error("Notification authorization failed: \(error.localizedDescription)")
+                self?.logger?.error("Notification authorization failed: \(error.localizedDescription)")
             } else {
-                Logger.debug("Notification authorization granted: \(granted)")
+                self?.logger?.debug("Notification authorization granted: \(granted)")
             }
         }
         monitor.onNeedsAttention = { [weak self] session in
@@ -101,14 +102,14 @@ final class MenuBarController {
             content: content,
             trigger: nil
         )
-        Logger.info("Posting notification for \(session.displayName): \(content.title)")
+        logger?.info("Posting notification for \(session.displayName): \(content.title)")
         UNUserNotificationCenter.current().add(request)
     }
 
     // MARK: - Menu construction
 
     private func rebuildMenu(sessions: [ClaudeSession]) {
-        Logger.debug("Rebuilding menu with \(sessions.count) session(s)")
+        logger?.debug("Rebuilding menu with \(sessions.count) session(s)")
         let menu = NSMenu()
 
         if sessions.isEmpty {
@@ -117,7 +118,7 @@ final class MenuBarController {
             menu.addItem(empty)
         } else {
             for session in sessions {
-                Logger.debug("  Menu item: \(session.displayName) [\(session.status)]")
+                logger?.debug("  Menu item: \(session.displayName) [\(session.status)]")
                 menu.addItem(menuItem(for: session))
             }
         }
@@ -209,14 +210,14 @@ final class MenuBarController {
     @objc private func handleSessionClick(_ sender: NSMenuItem) {
         guard let sessionID = sender.representedObject as? String,
               let session = monitor.sessions.first(where: { $0.id == sessionID }) else { return }
-        Logger.debug("Opening terminal for session \(session.displayName) at \(session.projectPath)")
-        TerminalLauncher.open(at: session.projectPath)
+        logger?.debug("Opening terminal for session \(session.displayName) at \(session.projectPath)")
+        TerminalLauncher.open(at: session.projectPath, logger: logger)
     }
 
     @objc private func handleOpenTerminal(_ sender: NSMenuItem) {
         guard let path = sender.representedObject as? String else { return }
-        Logger.debug("Opening terminal at \(path)")
-        TerminalLauncher.open(at: path)
+        logger?.debug("Opening terminal at \(path)")
+        TerminalLauncher.open(at: path, logger: logger)
     }
 
     @objc private func handleRefresh() {
