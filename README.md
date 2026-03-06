@@ -1,5 +1,5 @@
 # claude-squad
-A macOS menubar app to help you keep up with multiple Claude sessions.
+A macOS app to help you keep up with multiple Claude sessions.
 
 # TODO
 
@@ -20,5 +20,5 @@ A macOS menubar app to help you keep up with multiple Claude sessions.
 - [ ] Clean/dirty git index, # unpushed commits, # commits available remotely per session
 - [ ] Auto-update mechanism (Sparkle or similar)
 - [ ] Keyboard navigation in session list
-- [ ] Inject Git information into Plist and Sentry scope
-- [ ] Remove the menubar component, and make this just window-based
+- [x] Inject Git information into Plist and Sentry scope
+- [x] Remove the menubar component, make this just window-based

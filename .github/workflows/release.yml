@@ -16,12 +16,25 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          bundler-cache: true
 
       - name: Install dependencies
         run: brew bundle
 
+      - name: Generate Arkana keys
+        env:
+          SentryDSN: ${{ secrets.SENTRY_DSN }}
+          AmplitudeAPIKey: ${{ secrets.AMPLITUDE_API_KEY }}
+        run: bundle exec arkana
+
       - name: Generate Xcode project
-        run: make xcode 2>/dev/null || xcodegen
+        run: xcodegen
 
       - name: Set version
         run: |

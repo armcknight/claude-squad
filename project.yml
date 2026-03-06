@@ -4,12 +4,17 @@ packages:
   SwiftyBeaver:
     url: https://github.com/SwiftyBeaver/SwiftyBeaver
     version: 2.1.1
-  Sentry:
-    url: https://github.com/getsentry/sentry-cocoa
-    version: 8.44.0
   AmplitudeSwift:
     url: https://github.com/amplitude/Amplitude-Swift
     version: 1.12.0
+  ArkanaKeys:
+    path: ./ArkanaKeys/ArkanaKeys
+  ArkanaKeysInterfaces:
+    path: ./ArkanaKeys/ArkanaKeysInterfaces
+
+projectReferences:
+  Sentry:
+    path: sentry-cocoa/Sentry.xcodeproj
 
 options:
   bundleIdPrefix: com.armcknight
@@ -30,10 +35,13 @@ fileGroups:
   - README.md
   - Makefile
   - Brewfile
+  - Gemfile
   - project.yml
   - .gitignore
+  - .arkana.yml
   - .claude
   - .github
+  - .env
 
 targets:
   ClaudeSquad:
@@ -48,10 +56,15 @@ targets:
           copyFiles:
             destination: resources
             subpath: ""
+    preBuildScripts:
+      - name: Inject Git Info
+        script: "${SRCROOT}/scripts/inject-git-info.sh"
     dependencies:
       - package: SwiftyBeaver
-      - package: Sentry
+      - target: Sentry/Sentry
       - package: AmplitudeSwift
+      - package: ArkanaKeys
+      - package: ArkanaKeysInterfaces
     configFiles:
       Debug: config/ClaudeSquad.xcconfig
       Release: config/ClaudeSquad.xcconfig

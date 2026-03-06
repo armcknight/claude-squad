@@ -1,5 +1,7 @@
 import AppKit
+import ArkanaKeys
 import SwiftUI
+import UserNotifications
 
 @objc final class AppDelegate: NSObject, NSApplicationDelegate {
 
@@ -11,19 +13,22 @@ import SwiftUI
 
     private let detector: ClaudeSessionDetector
     private let monitor: SessionMonitor
-    private var menuBarController: MenuBarController?
     private var window: NSWindow?
 
     override init() {
+        let keys = ArkanaKeys.Global()
+
         // Error reporting
-        if let sentryDSN = Bundle.main.infoDictionary?["SENTRY_DSN"] as? String, !sentryDSN.isEmpty {
+        let sentryDSN = keys.sentryDSN
+        if !sentryDSN.isEmpty {
             errorReporter = SentryErrorReporter(dsn: sentryDSN)
         } else {
             errorReporter = NoOpErrorReporter()
         }
 
         // Analytics
-        if let amplitudeKey = Bundle.main.infoDictionary?["AMPLITUDE_API_KEY"] as? String, !amplitudeKey.isEmpty {
+        let amplitudeKey = keys.amplitudeAPIKey
+        if !amplitudeKey.isEmpty {
             analyticsProvider = AmplitudeAnalyticsProvider(apiKey: amplitudeKey)
         } else {
             analyticsProvider = NoOpAnalyticsProvider()
@@ -64,17 +69,13 @@ import SwiftUI
         errorReporter.configure()
         analyticsProvider.configure()
 
+        requestNotificationAuthorization()
+
         // Show the app in the Dock and App Switcher.
         NSApp.setActivationPolicy(.regular)
 
-        let menuBar = MenuBarController(monitor: monitor)
-        menuBar.logger = logger
-        menuBar.onShowWindow = { [weak self] in
-            self?.showWindow()
-        }
-        self.menuBarController = menuBar
-
         setupWindow()
+        setupNotificationHandler()
         monitor.start()
 
         analyticsProvider.track(event: AnalyticsEvent.appLaunched.rawValue, properties: nil)
@@ -130,5 +131,47 @@ import SwiftUI
     private func showWindow() {
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    // MARK: - Notifications
+
+    private func requestNotificationAuthorization() {
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { [weak self] granted, error in
+            if let error {
+                self?.logger.error("Notification authorization failed: \(error.localizedDescription)")
+            } else {
+                self?.logger.info("Notification authorization granted: \(granted)")
+            }
+        }
+    }
+
+    private func setupNotificationHandler() {
+        monitor.onNeedsAttention = { [weak self] session in
+            self?.postNotification(for: session)
+        }
+    }
+
+    private func postNotification(for session: ClaudeSession) {
+        let content = UNMutableNotificationContent()
+        content.sound = .default
+
+        switch session.status {
+        case .waitingForQuestion(_, let question):
+            content.title = "\(session.displayName) needs input"
+            content.body = question ?? "Claude is asking a question"
+        case .waitingIdle:
+            content.title = "\(session.displayName) is idle"
+            content.body = "Claude has finished and is waiting for your next instruction"
+        default:
+            return
+        }
+
+        let request = UNNotificationRequest(
+            identifier: "claude-squad-\(session.id)-\(session.status.sortPriority)",
+            content: content,
+            trigger: nil
+        )
+        logger.info("Posting notification for \(session.displayName): \(content.title)")
+        UNUserNotificationCenter.current().add(request)
     }
 }

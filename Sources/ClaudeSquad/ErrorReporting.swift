@@ -45,6 +45,20 @@ final class SentryErrorReporter: ErrorReporter {
             options.environment = "release"
             #endif
         }
+
+        let info = Bundle.main.infoDictionary
+
+        SentrySDK.configureScope { scope in
+            if let gitCommit = info?["GIT_COMMIT_HASH"] as? String, !gitCommit.isEmpty {
+                scope.setTag(value: gitCommit, key: "git.commit")
+            }
+            if let gitBranch = info?["GIT_BRANCH_NAME"] as? String, !gitBranch.isEmpty {
+                scope.setTag(value: gitBranch, key: "git.branch")
+            }
+            if let appVersion = info?["CFBundleShortVersionString"] as? String {
+                scope.setTag(value: appVersion, key: "app.version")
+            }
+        }
     }
 
     func capture(error: Error, context: [String: Any]?) {

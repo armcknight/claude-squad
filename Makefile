@@ -2,9 +2,18 @@
 init:
 	which brew || /bin/bash -c "$$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 	brew bundle
+	rbenv install --skip-existing
+	rbenv exec gem install bundler
+	rbenv exec bundle install
+
+.PHONY: arkana
+arkana:
+	rbenv exec bundle exec arkana
 
 .PHONY: xcode
 xcode:
+	make arkana
+	git submodule update --init --recursive
 	xcodegen
 	open ClaudeSquad.xcodeproj
 
