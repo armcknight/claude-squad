@@ -13,6 +13,7 @@
             --orange: #f59e0b;
             --green: #10b981;
             --blue: #3b82f6;
+            --red: #ef4444;
             --gray-50: #f9fafb;
             --gray-100: #f3f4f6;
             --gray-200: #e5e7eb;
@@ -122,122 +123,6 @@
             color: var(--gray-400);
         }
 
-        /* Screenshot */
-        .screenshot {
-            max-width: 960px;
-            margin: 3rem auto 0;
-            padding: 0 2rem;
-        }
-        .screenshot .window {
-            background: var(--gray-900);
-            border-radius: 12px;
-            overflow: hidden;
-            box-shadow: 0 25px 60px rgba(0, 0, 0, 0.2);
-        }
-        .screenshot .titlebar {
-            height: 38px;
-            background: var(--gray-800);
-            display: flex;
-            align-items: center;
-            padding: 0 14px;
-            gap: 8px;
-        }
-        .screenshot .dot {
-            width: 12px;
-            height: 12px;
-            border-radius: 50%;
-        }
-        .screenshot .dot.red { background: #ff5f57; }
-        .screenshot .dot.yellow { background: #febc2e; }
-        .screenshot .dot.green { background: #28c840; }
-        .screenshot .content {
-            padding: 1.5rem;
-            display: flex;
-            gap: 1px;
-            background: #2d2d2d;
-            min-height: 340px;
-        }
-        .screenshot .sidebar {
-            width: 260px;
-            flex-shrink: 0;
-            display: flex;
-            flex-direction: column;
-            gap: 2px;
-        }
-        .screenshot .detail {
-            flex: 1;
-            padding: 0 1.25rem;
-        }
-        .session-item {
-            padding: 8px 10px;
-            border-radius: 6px;
-            font-size: 0.8rem;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            color: #ccc;
-        }
-        .session-item.selected { background: rgba(124, 58, 237, 0.25); }
-        .session-item .indicator {
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            flex-shrink: 0;
-        }
-        .indicator.running { background: var(--blue); }
-        .indicator.question { background: var(--orange); }
-        .indicator.idle { background: var(--green); }
-        .section-label {
-            font-size: 0.7rem;
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-            color: #888;
-            padding: 10px 10px 4px;
-            font-weight: 600;
-        }
-        .detail h3 {
-            color: #eee;
-            font-size: 1rem;
-            margin-bottom: 0.5rem;
-        }
-        .detail .meta {
-            font-size: 0.75rem;
-            color: #999;
-            margin-bottom: 0.5rem;
-        }
-        .detail .question-box {
-            background: rgba(245, 158, 11, 0.1);
-            border: 1px solid rgba(245, 158, 11, 0.3);
-            border-radius: 6px;
-            padding: 10px;
-            font-size: 0.8rem;
-            color: #ddd;
-            margin-top: 0.75rem;
-        }
-        .detail .question-label {
-            font-size: 0.7rem;
-            text-transform: uppercase;
-            color: var(--orange);
-            font-weight: 600;
-            margin-bottom: 4px;
-        }
-        .detail .transcript-item {
-            padding: 6px 8px;
-            border-radius: 6px;
-            font-size: 0.75rem;
-            color: #ccc;
-            margin-top: 6px;
-        }
-        .transcript-item.user { background: rgba(59, 130, 246, 0.08); }
-        .transcript-item.assistant { background: rgba(124, 58, 237, 0.08); }
-        .transcript-item .role {
-            font-size: 0.65rem;
-            font-weight: 600;
-            margin-bottom: 2px;
-        }
-        .transcript-item.user .role { color: var(--blue); }
-        .transcript-item.assistant .role { color: var(--purple-light); }
-
         /* Features */
         .features {
             max-width: 1080px;
@@ -257,48 +142,53 @@
             font-size: 1.05rem;
             margin-bottom: 3rem;
         }
-        .features-grid {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 1.5rem;
-        }
-        .feature-card {
-            background: #fff;
-            border: 1px solid var(--gray-200);
-            border-radius: 12px;
-            padding: 1.75rem;
-            transition: box-shadow 0.2s, transform 0.15s;
-        }
-        .feature-card:hover {
-            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.06);
-            transform: translateY(-2px);
-        }
-        .feature-card .icon {
-            width: 40px;
-            height: 40px;
-            border-radius: 10px;
+        .feature-row {
             display: flex;
             align-items: center;
-            justify-content: center;
-            font-size: 1.2rem;
-            margin-bottom: 1rem;
+            gap: 3rem;
+            margin-bottom: 4rem;
         }
-        .feature-card h3 {
-            font-size: 1.05rem;
+        .feature-row.reverse { flex-direction: row-reverse; }
+        .feature-text {
+            flex: 1;
+            min-width: 0;
+        }
+        .feature-text .badge {
+            display: inline-block;
+            font-size: 0.75rem;
             font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            padding: 0.25rem 0.75rem;
+            border-radius: 100px;
+            margin-bottom: 0.75rem;
+        }
+        .badge.orange { background: rgba(245, 158, 11, 0.12); color: #b45309; }
+        .badge.yellow { background: rgba(234, 179, 8, 0.12); color: #a16207; }
+        .badge.blue { background: rgba(59, 130, 246, 0.12); color: #1d4ed8; }
+        .badge.red { background: rgba(239, 68, 68, 0.12); color: #b91c1c; }
+        .feature-text h3 {
+            font-size: 1.4rem;
+            font-weight: 700;
             margin-bottom: 0.5rem;
+            letter-spacing: -0.01em;
         }
-        .feature-card p {
-            font-size: 0.9rem;
+        .feature-text p {
+            font-size: 1rem;
             color: var(--gray-600);
-            line-height: 1.55;
+            line-height: 1.6;
         }
-        .icon.purple { background: rgba(124, 58, 237, 0.1); }
-        .icon.blue { background: rgba(59, 130, 246, 0.1); }
-        .icon.orange { background: rgba(245, 158, 11, 0.1); }
-        .icon.green { background: rgba(16, 185, 129, 0.1); }
-        .icon.red { background: rgba(239, 68, 68, 0.1); }
-        .icon.gray { background: rgba(107, 114, 128, 0.1); }
+        .feature-img {
+            flex: 1.3;
+            min-width: 0;
+        }
+        .feature-img img {
+            display: block;
+            width: 100%;
+            border-radius: 10px;
+            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.12);
+            border: 1px solid var(--gray-200);
+        }
 
         /* How it works */
         .how-it-works {
@@ -368,6 +258,24 @@
             font-size: 1.05rem;
             margin-bottom: 2rem;
         }
+        .final-cta .cta {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            background: var(--purple);
+            color: #fff;
+            padding: 0.85rem 2rem;
+            border-radius: 12px;
+            font-size: 1rem;
+            font-weight: 600;
+            text-decoration: none;
+            box-shadow: 0 4px 14px rgba(124, 58, 237, 0.3);
+            transition: background 0.15s, transform 0.1s;
+        }
+        .final-cta .cta:hover {
+            background: var(--purple-dark);
+            transform: translateY(-1px);
+        }
 
         /* Footer */
         footer {
@@ -382,9 +290,10 @@
         @media (max-width: 768px) {
             .hero h1 { font-size: 2.2rem; }
             .hero p { font-size: 1.05rem; }
-            .features-grid { grid-template-columns: 1fr; }
-            .screenshot .content { flex-direction: column; }
-            .screenshot .sidebar { width: 100%; }
+            .feature-row, .feature-row.reverse {
+                flex-direction: column;
+            }
+            .feature-img { width: 100%; }
         }
     </style>
 </head>
@@ -410,104 +319,58 @@
     </a>
     <p class="subtitle">Requires macOS 14 Sonoma or later</p>
 
-    <div class="screenshot">
-        <div class="window">
-            <div class="titlebar">
-                <div class="dot red"></div>
-                <div class="dot yellow"></div>
-                <div class="dot green"></div>
-            </div>
-            <div class="content">
-                <div class="sidebar">
-                    <div class="section-label">Needs Input (2)</div>
-                    <div class="session-item">
-                        <div class="indicator question"></div>
-                        aiml-2315-add-debug-menu
-                    </div>
-                    <div class="session-item selected">
-                        <div class="indicator question"></div>
-                        aiml-2566-issue-closed
-                    </div>
-                    <div class="section-label">Running (1)</div>
-                    <div class="session-item">
-                        <div class="indicator running"></div>
-                        claude-squad
-                    </div>
-                    <div class="section-label">Idle (4)</div>
-                    <div class="session-item">
-                        <div class="indicator idle"></div>
-                        onboarding-flow
-                    </div>
-                    <div class="session-item">
-                        <div class="indicator idle"></div>
-                        amplitude-analytics
-                    </div>
-                    <div class="session-item">
-                        <div class="indicator idle"></div>
-                        xcode-index-mcp
-                    </div>
-                    <div class="session-item">
-                        <div class="indicator idle"></div>
-                        streaming-issue-display
-                    </div>
-                </div>
-                <div class="detail">
-                    <h3>aiml-2566-issue-closed</h3>
-                    <div class="meta">~/Code/sentry-mobile-agent &middot; Branch: andrewmcknight/aiml-2566 &middot; PR #4821</div>
-                    <div class="question-box">
-                        <div class="question-label">Question</div>
-                        Approve Bash tool use?
-                    </div>
-                    <div style="margin-top: 1rem;">
-                        <div class="section-label" style="padding-left:0">Transcript</div>
-                        <div class="transcript-item user">
-                            <div class="role">You</div>
-                            fix the issue where closed PRs still show in the list
-                        </div>
-                        <div class="transcript-item assistant">
-                            <div class="role">Claude</div>
-                            I'll investigate the PR filtering logic. Let me check the current implementation...
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
+
 </section>
 
 <section class="features" id="features">
     <h2>Everything you need at a glance</h2>
     <p class="subtitle">Stop juggling terminal tabs. See every session's status instantly.</p>
-    <div class="features-grid">
-        <div class="feature-card">
-            <div class="icon orange">&#9888;</div>
-            <h3>Needs Input Alerts</h3>
-            <p>Know immediately when Claude is waiting for your approval or has a question. Sessions needing attention are grouped at the top.</p>
+
+    <!-- Needs Input -->
+    <div class="feature-row">
+        <div class="feature-text">
+            <div class="badge orange">Needs Input</div>
+            <h3>Know when Claude is waiting on you</h3>
+            <p>Sessions needing your approval or answer are grouped at the top. See the exact question Claude is asking, along with the full transcript and PR link, so you can respond without hunting through terminals.</p>
         </div>
-        <div class="feature-card">
-            <div class="icon blue">&#9654;</div>
-            <h3>Live Status Tracking</h3>
-            <p>See which sessions are running, idle, waiting for input, or interrupted. Status updates automatically every few seconds.</p>
+        <div class="feature-img">
+            <img src="screenshots/01-needs-input.png" alt="Session detail showing a question from Claude awaiting user input">
         </div>
-        <div class="feature-card">
-            <div class="icon purple">&#128172;</div>
-            <h3>Full Transcripts</h3>
-            <p>Read the complete conversation history for any session. See what Claude said, what tools it used, and what you asked.</p>
+    </div>
+
+    <!-- Idle -->
+    <div class="feature-row reverse">
+        <div class="feature-text">
+            <div class="badge yellow">Idle</div>
+            <h3>Track completed work and task progress</h3>
+            <p>When Claude finishes a turn it goes idle. See the tasks it completed, the PR it created, and the full conversation — so you know exactly where things stand before giving the next instruction.</p>
         </div>
-        <div class="feature-card">
-            <div class="icon green">&#9745;</div>
-            <h3>Task Progress</h3>
-            <p>Track task completion across sessions. See how many tasks are done, in progress, or pending at a glance.</p>
+        <div class="feature-img">
+            <img src="screenshots/02-idle.png" alt="Session detail showing idle status with completed tasks and PR link">
         </div>
-        <div class="feature-card">
-            <div class="icon red">&#128279;</div>
-            <h3>PR Links</h3>
-            <p>Jump straight to the pull request for any session. Claude Squad detects PR URLs from the conversation automatically.</p>
+    </div>
+
+    <!-- Running -->
+    <div class="feature-row">
+        <div class="feature-text">
+            <div class="badge blue">Running</div>
+            <h3>Watch sessions work in real time</h3>
+            <p>See which sessions are actively running, what tasks are in progress, and how far along they are. No need to switch to the terminal just to check if Claude is still working.</p>
         </div>
-        <div class="feature-card">
-            <div class="icon gray">&#128269;</div>
-            <h3>Project Grouping</h3>
-            <p>Sessions are organized by directory in a collapsible tree. Multiple sessions in the same repo are grouped together.</p>
+        <div class="feature-img">
+            <img src="screenshots/03-running.png" alt="Session detail showing a running session with tasks in progress">
+        </div>
+    </div>
+
+    <!-- Interrupted -->
+    <div class="feature-row reverse">
+        <div class="feature-text">
+            <div class="badge red">Interrupted</div>
+            <h3>Catch sessions that stopped unexpectedly</h3>
+            <p>If a session was cancelled or hit an error, you'll see it immediately. Review the transcript to understand what happened and decide whether to restart or continue from where it left off.</p>
+        </div>
+        <div class="feature-img">
+            <img src="screenshots/04-interrupted.png" alt="Session detail showing an interrupted session with partial task progress">
         </div>
     </div>
 </section>
@@ -544,7 +407,7 @@
 <section class="final-cta">
     <h2>Stop losing track of your Claude sessions</h2>
     <p>Free, open source, and built for developers who run multiple Claude Code sessions.</p>
-    <a href="https://github.com/armcknight/claude-squad/releases" class="cta" style="display:inline-flex;align-items:center;gap:0.5rem;background:var(--purple);color:#fff;padding:0.85rem 2rem;border-radius:12px;font-size:1rem;font-weight:600;text-decoration:none;box-shadow:0 4px 14px rgba(124,58,237,0.3);">
+    <a href="https://github.com/armcknight/claude-squad/releases" class="cta">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
         Download for macOS
     </a>

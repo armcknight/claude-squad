@@ -23,28 +23,24 @@ final class ScreenshotTests: XCTestCase {
 
     // MARK: - Screenshots
 
-    func testScreenshot_01_FullOverview() throws {
-        takeScreenshot(named: "01-full-overview")
-    }
-
-    func testScreenshot_02_NeedsInput() throws {
+    func testScreenshot_01_NeedsInput() throws {
         try clickFirstRowInSection("Needs Input")
-        takeScreenshot(named: "02-needs-input")
+        takeScreenshot(named: "01-needs-input")
     }
 
-    func testScreenshot_03_Idle() throws {
+    func testScreenshot_02_Idle() throws {
         try clickFirstRowInSection("Idle")
-        takeScreenshot(named: "03-idle")
+        takeScreenshot(named: "02-idle")
     }
 
-    func testScreenshot_04_Running() throws {
+    func testScreenshot_03_Running() throws {
         try clickFirstRowInSection("Running")
-        takeScreenshot(named: "04-running")
+        takeScreenshot(named: "03-running")
     }
 
-    func testScreenshot_05_Interrupted() throws {
+    func testScreenshot_04_Interrupted() throws {
         try clickFirstRowInSection("Interrupted")
-        takeScreenshot(named: "05-interrupted")
+        takeScreenshot(named: "04-interrupted")
     }
 
     // MARK: - Helpers
