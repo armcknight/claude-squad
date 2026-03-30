@@ -15,8 +15,10 @@ import UserNotifications
     private let globalHotkey = GlobalHotkey()
     private let detector: ClaudeSessionDetector
     private let monitor: SessionMonitor
+    private let versionManager = AppVersionManager()
     private var window: NSWindow?
     private var settingsWindow: NSWindow?
+    private var changelogWindow: NSWindow?
 
     override init() {
         let keys = ArkanaKeys.Global()
@@ -82,6 +84,8 @@ import UserNotifications
         setupNotificationHandler()
         setupGlobalHotkey()
         monitor.start()
+
+        checkForChangelogOnLaunch()
 
         analyticsProvider.track(event: AnalyticsEvent.appLaunched.rawValue, properties: nil)
         logger.info("Application started, monitoring active")
@@ -151,6 +155,10 @@ import UserNotifications
         let settingsItem = NSMenuItem(title: "Settings…", action: #selector(showSettings), keyEquivalent: ",")
         settingsItem.target = self
         appMenu.addItem(settingsItem)
+        appMenu.addItem(.separator())
+        let changelogItem = NSMenuItem(title: "What's New...", action: #selector(showChangelog), keyEquivalent: "")
+        changelogItem.target = self
+        appMenu.addItem(changelogItem)
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Quit Claude Squad", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         appMenuItem.submenu = appMenu
@@ -225,6 +233,71 @@ import UserNotifications
             self?.postNotification(for: session)
         }
     }
+
+    // MARK: - Changelog
+
+    private func loadChangelogEntries() -> [ChangelogEntry] {
+        guard let url = Bundle.main.url(forResource: "CHANGELOG", withExtension: "md"),
+              let content = try? String(contentsOf: url) else {
+            logger.warning("Could not load CHANGELOG.md from bundle")
+            return []
+        }
+        return ChangelogEntry.parse(from: content)
+    }
+
+    private func checkForChangelogOnLaunch() {
+        let isUpgrade = versionManager.checkForUpgrade()
+        versionManager.saveCurrentVersion()
+
+        guard isUpgrade else { return }
+
+        let allEntries = loadChangelogEntries()
+        let lastVersion = versionManager.lastLaunchedVersion ?? ""
+        let currentVersion = versionManager.currentVersion ?? ""
+        let newEntries = ChangelogEntry.entriesBetween(lastVersion: lastVersion, currentVersion: currentVersion, from: allEntries)
+
+        guard !newEntries.isEmpty else { return }
+
+        logger.info("App upgraded from \(lastVersion) to \(currentVersion), showing changelog")
+        analyticsProvider.track(event: AnalyticsEvent.changelogShownOnUpgrade.rawValue, properties: [
+            "from_version": lastVersion,
+            "to_version": currentVersion
+        ])
+
+        // Show after a short delay so the main window is visible first
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+            self?.showChangelogWindow(entries: newEntries, isWhatsNew: true)
+        }
+    }
+
+    @objc private func showChangelog() {
+        analyticsProvider.track(event: AnalyticsEvent.changelogOpened.rawValue)
+        let entries = loadChangelogEntries()
+        showChangelogWindow(entries: entries, isWhatsNew: false)
+    }
+
+    private func showChangelogWindow(entries: [ChangelogEntry], isWhatsNew: Bool) {
+        if let changelogWindow, changelogWindow.isVisible {
+            changelogWindow.makeKeyAndOrderFront(nil)
+            return
+        }
+
+        let view = ChangelogView(entries: entries, isWhatsNew: isWhatsNew)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 550, height: 500),
+            styleMask: [.titled, .closable, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.title = isWhatsNew ? "What's New" : "Changelog"
+        window.contentViewController = NSHostingController(rootView: view)
+        window.center()
+        window.makeKeyAndOrderFront(nil)
+        self.changelogWindow = window
+    }
+
+    // MARK: - Notifications
 
     private func postNotification(for session: ClaudeSession) {
         let content = UNMutableNotificationContent()

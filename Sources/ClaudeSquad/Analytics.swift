@@ -31,6 +31,10 @@ enum AnalyticsEvent: String {
     case sessionNeedsInput = "session_needs_input"
     case sessionSelected = "session_selected"
 
+    // Changelog
+    case changelogShownOnUpgrade = "changelog_shown_on_upgrade"
+    case changelogOpened = "changelog_opened"
+
     // Actions
     case copyPath = "copy_path"
     case copyBranch = "copy_branch"

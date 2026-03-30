@@ -42,6 +42,7 @@ fileGroups:
   - .claude
   - .github
   - .env
+  - CHANGELOG.md
 
 targets:
   ClaudeSquad:
@@ -50,6 +51,8 @@ targets:
     deploymentTarget: "14.0"
     sources:
       - Sources/ClaudeSquad
+      - path: CHANGELOG.md
+        buildPhase: resources
       - path: Fixtures
         type: folder
         buildPhase:

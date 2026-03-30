@@ -13,10 +13,10 @@ A macOS app to help you keep up with multiple Claude sessions.
 - [x] Launch at Login toggle in settings
 - [ ] Onboarding flow — slides for permissions setup (Full Disk Access if needed, notifications)
 - [x] Global hotkey — configurable shortcut to show/focus the window (default ⌘⇧C)
-- [ ] Changelog section in settings — show what's new after version upgrades
+- [x] Changelog — "What's New" menu item + auto-show on version upgrade
 - [ ] Hardened runtime + notarization — for distribution outside the App Store
 - [ ] Fastlane — automate signing, notarization, and release
-- [ ] Clean/dirty git index, # unpushed commits, # commits available remotely per session
+- [x] Clean/dirty git index, # unpushed commits, # commits available remotely per session
 - [ ] Auto-update mechanism (Sparkle or similar)
 - [ ] Keyboard navigation in session list
 - [x] Inject Git information into Plist and Sentry scope
