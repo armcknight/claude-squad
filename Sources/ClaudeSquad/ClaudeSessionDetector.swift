@@ -67,13 +67,23 @@ final class ClaudeSessionDetector {
         var sessions: [ClaudeSession] = []
         for jsonlPath in projectJSONLFiles {
             // Check if file has changed since last analysis.
+            // Sessions with time-dependent statuses (.running) must be re-evaluated
+            // because staleness thresholds may cause a status change even when the
+            // file itself hasn't been modified (e.g. running -> waitingForQuestion
+            // after a tool_use goes unapproved for >3 seconds).
             if let cached = sessionCache[jsonlPath] {
                 if let attrs = try? FileManager.default.attributesOfItem(atPath: jsonlPath),
                    let modDate = attrs[.modificationDate] as? Date,
                    modDate == cached.modDate {
-                    logger?.debug("Skipping unchanged session: \(cached.session.displayName)")
-                    sessions.append(cached.session)
-                    continue
+                    switch cached.session.status {
+                    case .running:
+                        // Re-evaluate: staleness may have crossed a threshold.
+                        logger?.debug("Re-evaluating running session: \(cached.session.displayName)")
+                    default:
+                        logger?.debug("Skipping unchanged session: \(cached.session.displayName)")
+                        sessions.append(cached.session)
+                        continue
+                    }
                 }
             }
 
