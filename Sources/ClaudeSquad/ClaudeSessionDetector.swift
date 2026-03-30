@@ -181,7 +181,10 @@ final class ClaudeSessionDetector {
         logger?.debug("  Status: \(status)")
 
         // Prefer git branch from JSONL metadata, fall back to .git/HEAD.
-        let gitBranch = meta.gitBranch ?? readGitBranch(projectPath: cwd)
+        let gitBranch = meta.gitBranch ?? GitHelper.readBranch(projectPath: cwd)
+        
+        // Read git status (working directory clean/dirty, ahead/behind counts).
+        let gitStatus = GitHelper.readStatus(projectPath: cwd)
 
         // Read full task items and derive summary from them.
         let taskItems = readTaskItems(sessionId: sessionId, claudeDir: claudeDir)
@@ -199,6 +202,7 @@ final class ClaudeSessionDetector {
             id: sessionId,
             projectPath: cwd,
             gitBranch: gitBranch,
+            gitStatus: gitStatus,
             slug: meta.slug,
             status: status,
             taskSummary: taskSummary,
@@ -506,21 +510,6 @@ final class ClaudeSessionDetector {
         }
         if let question = input["question"] as? String {
             return question
-        }
-        return nil
-    }
-
-    // MARK: - Git branch detection
-
-    func readGitBranch(projectPath: String) -> String? {
-        let headPath = (projectPath as NSString).appendingPathComponent(".git/HEAD")
-        guard let content = try? String(contentsOfFile: headPath, encoding: .utf8) else {
-            return nil
-        }
-        let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
-        let refPrefix = "ref: refs/heads/"
-        if trimmed.hasPrefix(refPrefix) {
-            return String(trimmed.dropFirst(refPrefix.count))
         }
         return nil
     }

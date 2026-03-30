@@ -1,5 +1,48 @@
 import Foundation
 
+/// Git repository status information.
+struct GitStatus: Equatable {
+    /// Whether the working directory has uncommitted changes (modified, added, deleted files).
+    let isDirty: Bool
+    
+    /// Number of commits ahead of the remote tracking branch (unpushed commits).
+    let commitsAhead: Int
+    
+    /// Number of commits behind the remote tracking branch (commits available to pull).
+    let commitsBehind: Int
+    
+    /// Whether the repository has a configured remote tracking branch.
+    let hasRemote: Bool
+    
+    /// Returns a human-readable summary of the git status.
+    var summary: String {
+        var parts: [String] = []
+        
+        if isDirty {
+            parts.append("uncommitted changes")
+        }
+        
+        if commitsAhead > 0 {
+            parts.append("\(commitsAhead) unpushed")
+        }
+        
+        if commitsBehind > 0 {
+            parts.append("\(commitsBehind) to pull")
+        }
+        
+        if parts.isEmpty {
+            return hasRemote ? "up to date" : "no remote"
+        }
+        
+        return parts.joined(separator: ", ")
+    }
+    
+    /// Returns true if there are any notable changes (dirty, ahead, or behind).
+    var hasChanges: Bool {
+        isDirty || commitsAhead > 0 || commitsBehind > 0
+    }
+}
+
 /// The operational state of a Claude session.
 enum SessionStatus: Equatable {
     /// Claude is actively processing (generating output or executing a tool).
@@ -132,6 +175,9 @@ struct ClaudeSession: Identifiable {
     /// Current git branch, if detected.
     var gitBranch: String?
 
+    /// Git repository status information.
+    var gitStatus: GitStatus?
+
     /// The claude-squad slug (human-friendly short name), if available.
     var slug: String?
 
@@ -181,6 +227,7 @@ extension ClaudeSession: Comparable {
             && lhs.status == rhs.status
             && lhs.taskSummary == rhs.taskSummary
             && lhs.gitBranch == rhs.gitBranch
+            && lhs.gitStatus == rhs.gitStatus
     }
 }
 
