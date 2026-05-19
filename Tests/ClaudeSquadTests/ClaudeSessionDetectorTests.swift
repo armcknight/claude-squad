@@ -279,7 +279,7 @@ final class ClaudeSessionDetectorTests: XCTestCase {
             atomically: true, encoding: .utf8
         )
 
-        let branch = detector.readGitBranch(projectPath: tempDir)
+        let branch = GitHelper.readBranch(projectPath: tempDir)
         XCTAssertEqual(branch, "feature/cool-thing")
     }
 
@@ -294,12 +294,139 @@ final class ClaudeSessionDetectorTests: XCTestCase {
             atomically: true, encoding: .utf8
         )
 
-        let branch = detector.readGitBranch(projectPath: tempDir)
+        let branch = GitHelper.readBranch(projectPath: tempDir)
         XCTAssertNil(branch)
     }
 
     func test_readGitBranchNoGitDir() {
-        let branch = detector.readGitBranch(projectPath: "/nonexistent/path")
+        let branch = GitHelper.readBranch(projectPath: "/nonexistent/path")
         XCTAssertNil(branch)
+    }
+
+    // MARK: - Subagent delegation
+
+    func test_isWaitingOnSubagent_trueForAgentToolUseWithoutResult() {
+        let lines = [
+            "{\"type\": \"assistant\", \"message\": {\"role\": \"assistant\", \"content\": [{\"type\": \"tool_use\", \"name\": \"Agent\", \"id\": \"toolu_x\"}]}}"
+        ]
+        XCTAssertTrue(detector.isWaitingOnSubagent(tailLines: lines))
+    }
+
+    func test_isWaitingOnSubagent_trueForTaskToolUseWithoutResult() {
+        let lines = [
+            "{\"type\": \"assistant\", \"message\": {\"role\": \"assistant\", \"content\": [{\"type\": \"tool_use\", \"name\": \"Task\", \"id\": \"toolu_y\"}]}}"
+        ]
+        XCTAssertTrue(detector.isWaitingOnSubagent(tailLines: lines))
+    }
+
+    func test_isWaitingOnSubagent_falseWhenToolResultFollows() {
+        let lines = [
+            "{\"type\": \"assistant\", \"message\": {\"role\": \"assistant\", \"content\": [{\"type\": \"tool_use\", \"name\": \"Agent\", \"id\": \"toolu_x\"}]}}",
+            "{\"type\": \"user\", \"message\": {\"role\": \"user\", \"content\": [{\"type\": \"tool_result\", \"tool_use_id\": \"toolu_x\", \"content\": \"done\"}]}}"
+        ]
+        XCTAssertFalse(detector.isWaitingOnSubagent(tailLines: lines))
+    }
+
+    func test_isWaitingOnSubagent_falseForNonAgentTool() {
+        let lines = [
+            "{\"type\": \"assistant\", \"message\": {\"role\": \"assistant\", \"content\": [{\"type\": \"tool_use\", \"name\": \"Bash\", \"id\": \"toolu_z\"}]}}"
+        ]
+        XCTAssertFalse(detector.isWaitingOnSubagent(tailLines: lines))
+    }
+
+    func test_isWaitingOnSubagent_falseForTextOnly() {
+        let lines = [
+            "{\"type\": \"assistant\", \"message\": {\"role\": \"assistant\", \"content\": [{\"type\": \"text\", \"text\": \"hi\"}]}}"
+        ]
+        XCTAssertFalse(detector.isWaitingOnSubagent(tailLines: lines))
+    }
+
+    func test_freshestSubagentJSONL_picksMostRecent() throws {
+        let root = (NSTemporaryDirectory() as NSString)
+            .appendingPathComponent("subagent_test_\(UUID().uuidString)")
+        let mainPath = root + ".jsonl"
+        let subDir = (root as NSString).appendingPathComponent("subagents")
+        try FileManager.default.createDirectory(atPath: subDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: root)
+                try? FileManager.default.removeItem(atPath: mainPath) }
+
+        try "{}\n".write(toFile: mainPath, atomically: true, encoding: .utf8)
+        let older = (subDir as NSString).appendingPathComponent("agent-older.jsonl")
+        let newer = (subDir as NSString).appendingPathComponent("agent-newer.jsonl")
+        try "{}\n".write(toFile: older, atomically: true, encoding: .utf8)
+        try "{}\n".write(toFile: newer, atomically: true, encoding: .utf8)
+        // Force the older file's modification date into the past.
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date().addingTimeInterval(-3600)], ofItemAtPath: older)
+
+        let result = detector.freshestSubagentJSONL(parentJSONLPath: mainPath)
+        XCTAssertEqual(result?.path, newer)
+    }
+
+    func test_freshestSubagentJSONL_nilWhenNoSubagentDir() {
+        let result = detector.freshestSubagentJSONL(parentJSONLPath: "/nonexistent/foo.jsonl")
+        XCTAssertNil(result)
+    }
+
+    func test_effectiveModDate_usesSubagentWhenNewer() throws {
+        let root = (NSTemporaryDirectory() as NSString)
+            .appendingPathComponent("effmod_test_\(UUID().uuidString)")
+        let mainPath = root + ".jsonl"
+        let subDir = (root as NSString).appendingPathComponent("subagents")
+        try FileManager.default.createDirectory(atPath: subDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: root)
+                try? FileManager.default.removeItem(atPath: mainPath) }
+
+        try "{}\n".write(toFile: mainPath, atomically: true, encoding: .utf8)
+        // Backdate the main file by an hour.
+        let mainDate = Date().addingTimeInterval(-3600)
+        try FileManager.default.setAttributes([.modificationDate: mainDate], ofItemAtPath: mainPath)
+        let sub = (subDir as NSString).appendingPathComponent("agent-fresh.jsonl")
+        try "{}\n".write(toFile: sub, atomically: true, encoding: .utf8)
+        let subDate = Date()
+        try FileManager.default.setAttributes([.modificationDate: subDate], ofItemAtPath: sub)
+
+        let result = detector.effectiveModDate(jsonlPath: mainPath)
+        XCTAssertNotNil(result)
+        // Should be approximately the subagent's mtime, not the main's.
+        if let result {
+            XCTAssertLessThan(abs(result.timeIntervalSince(subDate)), 2)
+            XCTAssertGreaterThan(result.timeIntervalSince(mainDate), 1800)
+        }
+    }
+
+    func test_resolveStatusSource_descendsIntoActiveSubagent() throws {
+        let root = (NSTemporaryDirectory() as NSString)
+            .appendingPathComponent("resolve_test_\(UUID().uuidString)")
+        let mainPath = root + ".jsonl"
+        let subDir = (root as NSString).appendingPathComponent("subagents")
+        try FileManager.default.createDirectory(atPath: subDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: root)
+                try? FileManager.default.removeItem(atPath: mainPath) }
+
+        // Main: last assistant block is an Agent tool_use with no following tool_result.
+        let mainContent = "{\"type\": \"assistant\", \"message\": {\"role\": \"assistant\", \"content\": [{\"type\": \"tool_use\", \"name\": \"Agent\", \"id\": \"toolu_main\"}]}}\n"
+        try mainContent.write(toFile: mainPath, atomically: true, encoding: .utf8)
+        // Subagent: actively writing — last line is a Bash tool_use.
+        let subPath = (subDir as NSString).appendingPathComponent("agent-active.jsonl")
+        let subContent = "{\"type\": \"assistant\", \"message\": {\"role\": \"assistant\", \"content\": [{\"type\": \"tool_use\", \"name\": \"Bash\", \"id\": \"toolu_bash\"}]}}\n"
+        try subContent.write(toFile: subPath, atomically: true, encoding: .utf8)
+
+        let resolved = detector.resolveStatusSource(jsonlPath: mainPath, fallbackModDate: Date())
+        XCTAssertEqual(resolved.path, subPath)
+    }
+
+    func test_resolveStatusSource_staysOnMainWhenNotWaitingOnSubagent() throws {
+        let root = (NSTemporaryDirectory() as NSString)
+            .appendingPathComponent("resolve_test2_\(UUID().uuidString)")
+        let mainPath = root + ".jsonl"
+        defer { try? FileManager.default.removeItem(atPath: mainPath) }
+
+        // Main: last assistant block is plain text.
+        let mainContent = "{\"type\": \"assistant\", \"message\": {\"role\": \"assistant\", \"content\": [{\"type\": \"text\", \"text\": \"hi\"}]}}\n"
+        try mainContent.write(toFile: mainPath, atomically: true, encoding: .utf8)
+
+        let resolved = detector.resolveStatusSource(jsonlPath: mainPath, fallbackModDate: Date())
+        XCTAssertEqual(resolved.path, mainPath)
     }
 }

@@ -66,32 +66,28 @@ final class ClaudeSessionDetector {
         // Step 2: Analyze each session, skipping unchanged files.
         var sessions: [ClaudeSession] = []
         for jsonlPath in projectJSONLFiles {
-            // Check if file has changed since last analysis.
-            // Sessions with time-dependent statuses (.running) must be re-evaluated
-            // because staleness thresholds may cause a status change even when the
-            // file itself hasn't been modified (e.g. running -> waitingForQuestion
-            // after a tool_use goes unapproved for >3 seconds).
-            if let cached = sessionCache[jsonlPath] {
-                if let attrs = try? FileManager.default.attributesOfItem(atPath: jsonlPath),
-                   let modDate = attrs[.modificationDate] as? Date,
-                   modDate == cached.modDate {
-                    switch cached.session.status {
-                    case .running:
-                        // Re-evaluate: staleness may have crossed a threshold.
-                        logger?.debug("Re-evaluating running session: \(cached.session.displayName)")
-                    default:
-                        logger?.debug("Skipping unchanged session: \(cached.session.displayName)")
-                        sessions.append(cached.session)
-                        continue
-                    }
+            // Effective mod date = max(main JSONL, freshest subagent JSONL). Subagent
+            // activity can change the session status without touching the main file,
+            // so the cache must invalidate on subagent writes too.
+            let currentModDate = effectiveModDate(jsonlPath: jsonlPath)
+
+            if let cached = sessionCache[jsonlPath],
+               let currentModDate,
+               currentModDate == cached.modDate {
+                switch cached.session.status {
+                case .running:
+                    // Re-evaluate: staleness may have crossed a threshold.
+                    logger?.debug("Re-evaluating running session: \(cached.session.displayName)")
+                default:
+                    logger?.debug("Skipping unchanged session: \(cached.session.displayName)")
+                    sessions.append(cached.session)
+                    continue
                 }
             }
 
             if let session = analyzeSession(jsonlPath: jsonlPath, claudeDir: claudeDir) {
-                // Cache the result with the file's current modification date.
-                if let attrs = try? FileManager.default.attributesOfItem(atPath: jsonlPath),
-                   let modDate = attrs[.modificationDate] as? Date {
-                    sessionCache[jsonlPath] = (modDate: modDate, session: session)
+                if let currentModDate {
+                    sessionCache[jsonlPath] = (modDate: currentModDate, session: session)
                 }
                 sessions.append(session)
             }
@@ -184,11 +180,15 @@ final class ClaudeSessionDetector {
         let sessionId = meta.sessionId
         logger?.debug("Analyzing session \(sessionId): cwd=\(cwd)")
 
-        // Read tail lines to determine status.
-        let tailLines = readTailLines(filePath: jsonlPath, lineCount: tailLineCount)
-        logger?.debug("  Read \(tailLines.count) tail lines")
-        let status = determineStatus(tailLines: tailLines, lastModified: lastModified)
+        // Read tail lines to determine status. If the main JSONL's last assistant
+        // message is an unresolved Agent/Task tool_use, the real work is happening
+        // in a subagent JSONL — walk into it (recursively) and derive status there.
+        let (statusPath, statusModDate) = resolveStatusSource(jsonlPath: jsonlPath, fallbackModDate: lastModified)
+        let tailLines = readTailLines(filePath: statusPath, lineCount: tailLineCount)
+        logger?.debug("  Read \(tailLines.count) tail lines from \((statusPath as NSString).lastPathComponent)")
+        let status = determineStatus(tailLines: tailLines, lastModified: statusModDate)
         logger?.debug("  Status: \(status)")
+        let effectiveLastModified = max(lastModified, statusModDate)
 
         // Prefer git branch from JSONL metadata, fall back to .git/HEAD.
         let gitBranch = meta.gitBranch ?? GitHelper.readBranch(projectPath: cwd)
@@ -216,13 +216,130 @@ final class ClaudeSessionDetector {
             slug: meta.slug,
             status: status,
             taskSummary: taskSummary,
-            lastModified: lastModified
+            lastModified: effectiveLastModified
         )
         session.taskItems = taskItems
         session.pullRequestURL = prURL
         session.jsonlPath = jsonlPath
         logger?.debug("  -> \(session.displayName) [\(status)]")
         return session
+    }
+
+    // MARK: - Subagent resolution
+
+    /// Walks the subagent chain starting from `jsonlPath`. If the file's last assistant
+    /// block is an unresolved Agent/Task tool_use, descends into the freshest subagent
+    /// JSONL under `<jsonlPath_without_ext>/subagents/` and repeats. Returns the
+    /// JSONL path whose tail should drive status, plus its modification date.
+    func resolveStatusSource(jsonlPath: String, fallbackModDate: Date) -> (path: String, modDate: Date) {
+        var currentPath = jsonlPath
+        var currentMod = fallbackModDate
+        // Guard against pathological chains.
+        for _ in 0..<8 {
+            let tail = readTailLines(filePath: currentPath, lineCount: tailLineCount)
+            guard isWaitingOnSubagent(tailLines: tail),
+                  let (subPath, subMod) = freshestSubagentJSONL(parentJSONLPath: currentPath) else {
+                return (currentPath, currentMod)
+            }
+            logger?.debug("  delegating to subagent: \((subPath as NSString).lastPathComponent)")
+            currentPath = subPath
+            currentMod = subMod
+        }
+        return (currentPath, currentMod)
+    }
+
+    /// Returns true if the most recent assistant message in the tail is an Agent/Task
+    /// tool_use with no following user tool_result.
+    func isWaitingOnSubagent(tailLines: [String]) -> Bool {
+        if checkForToolResultAfterLastAssistant(tailLines: tailLines) { return false }
+
+        for line in tailLines.reversed() {
+            guard let data = line.data(using: .utf8),
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                continue
+            }
+            let type = json["type"] as? String
+            let messageRole = (json["message"] as? [String: Any])?["role"] as? String
+
+            if type == "assistant" || messageRole == "assistant" {
+                let content: [[String: Any]]
+                if let message = json["message"] as? [String: Any],
+                   let c = message["content"] as? [[String: Any]] {
+                    content = c
+                } else if let c = json["content"] as? [[String: Any]] {
+                    content = c
+                } else {
+                    return false
+                }
+                guard let lastBlock = content.last,
+                      (lastBlock["type"] as? String) == "tool_use",
+                      let toolName = lastBlock["name"] as? String else {
+                    return false
+                }
+                return toolName == "Agent" || toolName == "Task"
+            }
+            if type == "user" || messageRole == "user" {
+                return false
+            }
+        }
+        return false
+    }
+
+    /// Returns the freshest `agent-*.jsonl` under `<parentJSONLPath_without_ext>/subagents/`.
+    func freshestSubagentJSONL(parentJSONLPath: String) -> (path: String, modDate: Date)? {
+        let subagentDir = (parentJSONLPath as NSString).deletingPathExtension + "/subagents"
+        let fm = FileManager.default
+        guard let files = try? fm.contentsOfDirectory(atPath: subagentDir) else { return nil }
+
+        var bestPath: String?
+        var bestDate: Date?
+        for file in files where file.hasSuffix(".jsonl") {
+            let path = (subagentDir as NSString).appendingPathComponent(file)
+            guard let attrs = try? fm.attributesOfItem(atPath: path),
+                  let mod = attrs[.modificationDate] as? Date else { continue }
+            if bestDate == nil || mod > bestDate! {
+                bestPath = path
+                bestDate = mod
+            }
+        }
+        if let bestPath, let bestDate {
+            return (bestPath, bestDate)
+        }
+        return nil
+    }
+
+    /// Returns the max modification date across the main JSONL and any subagent JSONLs
+    /// reachable through nested `subagents/` directories. Used as a cache key so that
+    /// subagent writes invalidate the cached session.
+    func effectiveModDate(jsonlPath: String) -> Date? {
+        let fm = FileManager.default
+        guard let attrs = try? fm.attributesOfItem(atPath: jsonlPath),
+              let mainMod = attrs[.modificationDate] as? Date else { return nil }
+        let subagentDir = (jsonlPath as NSString).deletingPathExtension + "/subagents"
+        if let subMax = maxJSONLModDate(in: subagentDir), subMax > mainMod {
+            return subMax
+        }
+        return mainMod
+    }
+
+    /// Recursively finds the latest `.jsonl` modification date in `dir` and any nested
+    /// `<file_without_ext>/subagents/` directories.
+    private func maxJSONLModDate(in dir: String) -> Date? {
+        let fm = FileManager.default
+        guard let files = try? fm.contentsOfDirectory(atPath: dir) else { return nil }
+        var best: Date?
+        for file in files where file.hasSuffix(".jsonl") {
+            let path = (dir as NSString).appendingPathComponent(file)
+            if let attrs = try? fm.attributesOfItem(atPath: path),
+               let mod = attrs[.modificationDate] as? Date {
+                if best == nil || mod > best! { best = mod }
+            }
+            let nestedDir = (path as NSString).deletingPathExtension + "/subagents"
+            if let nested = maxJSONLModDate(in: nestedDir), best == nil || nested > best! {
+                best = nested
+            }
+        }
+        return best
     }
 
     // MARK: - Session metadata reading (cached)
