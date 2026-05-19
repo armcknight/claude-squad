@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+- Session status now reflects activity inside running subagents. Previously, sessions invoking a long `Agent`/`Task` call would appear stuck in "Needs Input" because the detector only watched the top-level JSONL, and approval prompts raised by the subagent itself were invisible.
+
 ## [1.0.0] - 2026-03-06
 
 ### Added
