@@ -35,7 +35,9 @@
       "mcp__xcode-index-mcp__search_pattern",
       "Bash(xcodegen generate:*)",
       "Bash(head:*)",
-      "Bash(xcrun xcresulttool:*)"
+      "Bash(xcrun xcresulttool:*)",
+      "mcp__XcodeBuildMCP__build_macos",
+      "mcp__XcodeBuildMCP__test_macos"
     ],
     "deny": []
   }
