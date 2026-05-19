@@ -27,3 +27,5 @@ Gemfile.lock
 .build/
 .swiftpm/
 Package.swift
+/.envrc
+/worktrees/
