@@ -37,7 +37,9 @@
       "Bash(head:*)",
       "Bash(xcrun xcresulttool:*)",
       "mcp__XcodeBuildMCP__build_macos",
-      "mcp__XcodeBuildMCP__test_macos"
+      "mcp__XcodeBuildMCP__test_macos",
+      "Bash(direnv exec . linctl issue get:*)",
+      "Bash(direnv exec . linctl issue update:*)"
     ],
     "deny": []
   }
