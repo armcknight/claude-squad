@@ -42,6 +42,17 @@ final class ClaudeSessionDetector {
         let slug: String?
     }
 
+    /// Live state from `~/.claude/sessions/<pid>.json` for a running Claude
+    /// process. The JSONL file does not reflect pending tool-use prompts
+    /// (Claude buffers them until the user responds), so this is the only
+    /// on-disk signal that a session is awaiting user input.
+    struct LiveSessionState: Equatable {
+        let sessionId: String
+        let status: String      // "busy", "waiting", "idle"
+        let waitingFor: String? // e.g., "permission prompt"
+        let updatedAt: Date
+    }
+
     // MARK: - Public API
 
     /// Detects all active Claude sessions. Called each poll cycle.
@@ -67,6 +78,11 @@ final class ClaudeSessionDetector {
         let projectJSONLFiles = findProjectJSONLFiles(projectsDir: projectsDir)
         logger?.info("Found \(projectJSONLFiles.count) project JSONL file(s)")
 
+        // Live state from sessions/*.json — used to override JSONL-derived
+        // status when a Claude process is paused on a permission prompt that
+        // hasn't been persisted to the JSONL yet.
+        let liveStates = readLiveSessionStates(claudeDir: claudeDir)
+
         // Step 2: Analyze each session, skipping unchanged files.
         var sessions: [ClaudeSession] = []
         for jsonlPath in projectJSONLFiles {
@@ -83,17 +99,21 @@ final class ClaudeSessionDetector {
                     // Re-evaluate: staleness may have crossed a threshold.
                     logger?.debug("Re-evaluating running session: \(cached.session.displayName)")
                 default:
+                    // Re-apply the live overlay on cache hit — live state can
+                    // change without the JSONL being touched.
+                    let overlaid = applyingLiveStateOverlay(cached.session, liveStates: liveStates)
                     logger?.debug("Skipping unchanged session: \(cached.session.displayName)")
-                    sessions.append(cached.session)
+                    sessions.append(overlaid)
                     continue
                 }
             }
 
             if let session = analyzeSession(jsonlPath: jsonlPath, claudeDir: claudeDir) {
+                let overlaid = applyingLiveStateOverlay(session, liveStates: liveStates)
                 if let currentModDate {
-                    sessionCache[jsonlPath] = (modDate: currentModDate, session: session)
+                    sessionCache[jsonlPath] = (modDate: currentModDate, session: overlaid)
                 }
-                sessions.append(session)
+                sessions.append(overlaid)
             }
         }
 
@@ -122,6 +142,78 @@ final class ClaudeSessionDetector {
         #endif
         let home = NSHomeDirectory()
         return (home as NSString).appendingPathComponent(".claude")
+    }
+
+    // MARK: - Live session state
+
+    /// Scans `<claudeDir>/sessions/*.json` and returns a map keyed by sessionId.
+    /// Each running Claude process writes a small file here describing whether
+    /// it is busy, waiting on a permission prompt, etc. Returns an empty map if
+    /// the directory does not exist.
+    func readLiveSessionStates(claudeDir: String) -> [String: LiveSessionState] {
+        let sessionsDir = (claudeDir as NSString).appendingPathComponent("sessions")
+        let fm = FileManager.default
+        guard let entries = try? fm.contentsOfDirectory(atPath: sessionsDir) else {
+            return [:]
+        }
+        var result: [String: LiveSessionState] = [:]
+        for entry in entries where entry.hasSuffix(".json") {
+            let path = (sessionsDir as NSString).appendingPathComponent(entry)
+            guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let sessionId = json["sessionId"] as? String,
+                  let status = json["status"] as? String else {
+                continue
+            }
+            let updatedAtMs = (json["updatedAt"] as? Double) ?? 0
+            let state = LiveSessionState(
+                sessionId: sessionId,
+                status: status,
+                waitingFor: json["waitingFor"] as? String,
+                updatedAt: Date(timeIntervalSince1970: updatedAtMs / 1000.0)
+            )
+            // If multiple PIDs claim the same sessionId, prefer the most recent.
+            if let existing = result[sessionId], existing.updatedAt > state.updatedAt { continue }
+            result[sessionId] = state
+        }
+        return result
+    }
+
+    /// Returns the user-facing question string for a live waiting state, or nil
+    /// if the live state is not a waiting state we should surface.
+    func waitingQuestionText(for state: LiveSessionState) -> String? {
+        guard state.status == "waiting" else { return nil }
+        switch state.waitingFor {
+        case "permission prompt":
+            return "Permission prompt pending — see terminal"
+        case .some(let other):
+            return "Waiting on \(other) — see terminal"
+        case .none:
+            return "Waiting for input — see terminal"
+        }
+    }
+
+    /// Applies the live-state overlay to a JSONL-derived session. Sessions whose
+    /// owning Claude process is paused on a permission/user prompt are not
+    /// reflected in the JSONL (the pending tool_use is buffered in memory), so
+    /// this overlay is the only way to surface them.
+    func applyingLiveStateOverlay(_ session: ClaudeSession, liveStates: [String: LiveSessionState]) -> ClaudeSession {
+        guard let state = liveStates[session.id],
+              let question = waitingQuestionText(for: state) else {
+            return session
+        }
+        // Only override if the JSONL-derived status would mislead the user
+        // (interrupted/inactive/idle). A running session whose live state is
+        // momentarily "waiting" is already accurate enough to leave alone.
+        switch session.status {
+        case .waitingForQuestion:
+            return session
+        case .running, .waitingIdle, .interrupted, .inactive:
+            var updated = session
+            let since = max(state.updatedAt, session.lastModified)
+            updated.status = .waitingForQuestion(since: since, question: question)
+            return updated
+        }
     }
 
     // MARK: - Project JSONL discovery
@@ -946,44 +1038,9 @@ final class ClaudeSessionDetector {
                     continue
                 }
 
-                guard let message = json["message"] as? [String: Any],
-                      let role = message["role"] as? String else {
-                    continue
+                if let msg = transcriptMessage(from: json) {
+                    messages.append(msg)
                 }
-
-                let uuid = (json["uuid"] as? String) ?? UUID().uuidString
-                let timestamp = parseTimestamp(json["timestamp"] as? String)
-
-                var textParts: [String] = []
-                var toolCalls: [ToolCallSummary] = []
-
-                if let contentStr = message["content"] as? String {
-                    let cleaned = contentStr.trimmingCharacters(in: .whitespacesAndNewlines)
-                    if !cleaned.isEmpty { textParts.append(cleaned) }
-                } else if let contentArray = message["content"] as? [[String: Any]] {
-                    for block in contentArray {
-                        let blockType = block["type"] as? String
-                        if blockType == "text", let text = block["text"] as? String {
-                            let cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
-                            if !cleaned.isEmpty { textParts.append(cleaned) }
-                        } else if blockType == "tool_use" {
-                            let name = block["name"] as? String ?? "unknown"
-                            let summary = toolCallSummary(name: name, input: block["input"] as? [String: Any])
-                            toolCalls.append(ToolCallSummary(name: name, summary: summary))
-                        }
-                    }
-                }
-
-                if textParts.isEmpty && toolCalls.isEmpty { continue }
-
-                let fullText = textParts.joined(separator: "\n\n")
-                messages.append(TranscriptMessage(
-                    id: uuid,
-                    role: role,
-                    text: fullText,
-                    timestamp: timestamp,
-                    toolCalls: toolCalls
-                ))
             }
         }
 
@@ -993,35 +1050,8 @@ final class ClaudeSessionDetector {
             linesRead += 1
             if let lineData = trimmed.data(using: .utf8),
                let json = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any],
-               let message = json["message"] as? [String: Any],
-               let role = message["role"] as? String {
-                let uuid = (json["uuid"] as? String) ?? UUID().uuidString
-                let timestamp = parseTimestamp(json["timestamp"] as? String)
-                var textParts: [String] = []
-                var toolCalls: [ToolCallSummary] = []
-                if let contentStr = message["content"] as? String {
-                    let cleaned = contentStr.trimmingCharacters(in: .whitespacesAndNewlines)
-                    if !cleaned.isEmpty { textParts.append(cleaned) }
-                } else if let contentArray = message["content"] as? [[String: Any]] {
-                    for block in contentArray {
-                        let blockType = block["type"] as? String
-                        if blockType == "text", let text = block["text"] as? String {
-                            let cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
-                            if !cleaned.isEmpty { textParts.append(cleaned) }
-                        } else if blockType == "tool_use" {
-                            let name = block["name"] as? String ?? "unknown"
-                            let summary = toolCallSummary(name: name, input: block["input"] as? [String: Any])
-                            toolCalls.append(ToolCallSummary(name: name, summary: summary))
-                        }
-                    }
-                }
-                if !textParts.isEmpty || !toolCalls.isEmpty {
-                    messages.append(TranscriptMessage(
-                        id: uuid, role: role,
-                        text: textParts.joined(separator: "\n\n"),
-                        timestamp: timestamp, toolCalls: toolCalls
-                    ))
-                }
+               let msg = transcriptMessage(from: json) {
+                messages.append(msg)
             }
         }
 
@@ -1037,6 +1067,65 @@ final class ClaudeSessionDetector {
         // Try without fractional seconds
         formatter.formatOptions = [.withInternetDateTime]
         return formatter.date(from: str)
+    }
+
+    /// Builds a TranscriptMessage from one parsed JSONL line, or nil if the
+    /// line has no displayable content.
+    private func transcriptMessage(from json: [String: Any]) -> TranscriptMessage? {
+        guard let message = json["message"] as? [String: Any],
+              let role = message["role"] as? String else {
+            return nil
+        }
+
+        let uuid = (json["uuid"] as? String) ?? UUID().uuidString
+        let timestamp = parseTimestamp(json["timestamp"] as? String)
+
+        var textParts: [String] = []
+        var toolCalls: [ToolCallSummary] = []
+        var askAnswers: [AskUserAnswer] = []
+
+        if let contentStr = message["content"] as? String {
+            let cleaned = contentStr.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !cleaned.isEmpty { textParts.append(cleaned) }
+        } else if let contentArray = message["content"] as? [[String: Any]] {
+            for block in contentArray {
+                let blockType = block["type"] as? String
+                if blockType == "text", let text = block["text"] as? String {
+                    let cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !cleaned.isEmpty { textParts.append(cleaned) }
+                } else if blockType == "tool_use" {
+                    let name = block["name"] as? String ?? "unknown"
+                    let input = block["input"] as? [String: Any]
+                    let summary = toolCallSummary(name: name, input: input)
+                    let questions = name == "AskUserQuestion"
+                        ? askUserQuestions(from: input)
+                        : []
+                    toolCalls.append(ToolCallSummary(
+                        name: name,
+                        summary: summary,
+                        askQuestions: questions
+                    ))
+                } else if blockType == "tool_result" {
+                    if let contentStr = block["content"] as? String,
+                       let answer = parseAskUserAnswer(contentStr) {
+                        askAnswers.append(answer)
+                    }
+                }
+            }
+        }
+
+        if textParts.isEmpty && toolCalls.isEmpty && askAnswers.isEmpty {
+            return nil
+        }
+
+        return TranscriptMessage(
+            id: uuid,
+            role: role,
+            text: textParts.joined(separator: "\n\n"),
+            timestamp: timestamp,
+            toolCalls: toolCalls,
+            askAnswers: askAnswers
+        )
     }
 
     private func toolCallSummary(name: String, input: [String: Any]?) -> String? {
@@ -1065,6 +1154,78 @@ final class ClaudeSessionDetector {
         default:
             return nil
         }
+    }
+
+    /// Extracts structured questions + options from an AskUserQuestion input.
+    private func askUserQuestions(from input: [String: Any]?) -> [AskUserQuestionContent] {
+        guard let questions = input?["questions"] as? [[String: Any]] else { return [] }
+        return questions.compactMap { q in
+            guard let text = q["question"] as? String else { return nil }
+            let options: [AskUserQuestionContent.Option] = (q["options"] as? [[String: Any]] ?? []).compactMap { opt in
+                guard let label = opt["label"] as? String else { return nil }
+                return AskUserQuestionContent.Option(
+                    label: label,
+                    description: opt["description"] as? String
+                )
+            }
+            return AskUserQuestionContent(
+                question: text,
+                header: q["header"] as? String,
+                multiSelect: (q["multiSelect"] as? Bool) ?? false,
+                options: options
+            )
+        }
+    }
+
+    /// Parses the synthetic `User has answered your questions: "Q"="A"...`
+    /// content the harness emits for AskUserQuestion tool_results.
+    private func parseAskUserAnswer(_ content: String) -> AskUserAnswer? {
+        let marker = "User has answered your questions:"
+        guard let markerRange = content.range(of: marker) else { return nil }
+        let body = content[markerRange.upperBound...]
+
+        // Find the first "Q"="A" pair. Both sides are double-quoted in the harness output.
+        guard let qOpen = body.firstIndex(of: "\""),
+              let qClose = body[body.index(after: qOpen)...].firstIndex(of: "\"") else {
+            return nil
+        }
+        let question = String(body[body.index(after: qOpen)..<qClose])
+
+        let afterQ = body[body.index(after: qClose)...]
+        guard let eq = afterQ.firstIndex(of: "="),
+              let aOpen = afterQ[afterQ.index(after: eq)...].firstIndex(of: "\""),
+              let aClose = afterQ[afterQ.index(after: aOpen)...].firstIndex(of: "\"") else {
+            return nil
+        }
+        let selection = String(afterQ[afterQ.index(after: aOpen)..<aClose])
+
+        let rest = String(afterQ[afterQ.index(after: aClose)...])
+        // Notes are short, single-line; stop at sentence end, newline, or result-id.
+        let notes = extract(after: "user notes:", in: rest, stoppingAt: [". ", "\n", "[result-id"])
+        // Preview is a multi-line code block; only stop at the result-id sentinel.
+        let preview = extract(after: "selected preview:", in: rest, stoppingAt: ["[result-id"])
+        return AskUserAnswer(
+            question: question,
+            selection: selection,
+            notes: notes,
+            preview: preview
+        )
+    }
+
+    /// Returns trimmed text following `marker` up to the earliest of the given
+    /// sentinels (or end of string). Returns nil if the marker is absent or the
+    /// captured text is empty.
+    private func extract(after marker: String, in text: String, stoppingAt sentinels: [String]) -> String? {
+        guard let range = text.range(of: marker) else { return nil }
+        let tail = text[range.upperBound...]
+        var endIndex = tail.endIndex
+        for sentinel in sentinels {
+            if let r = tail.range(of: sentinel), r.lowerBound < endIndex {
+                endIndex = r.lowerBound
+            }
+        }
+        let captured = tail[..<endIndex].trimmingCharacters(in: .whitespacesAndNewlines)
+        return captured.isEmpty ? nil : captured
     }
 
     // MARK: - PR URL detection

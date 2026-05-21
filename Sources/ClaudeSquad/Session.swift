@@ -155,12 +155,37 @@ struct TranscriptMessage: Identifiable, Equatable {
     let text: String
     let timestamp: Date?
     let toolCalls: [ToolCallSummary]
+    /// Parsed answers to AskUserQuestion tool_result blocks on this user message.
+    var askAnswers: [AskUserAnswer] = []
 }
 
 /// Brief summary of a tool call for display in the transcript.
 struct ToolCallSummary: Equatable {
     let name: String
     let summary: String?
+    /// Structured AskUserQuestion content (questions + options), when applicable.
+    var askQuestions: [AskUserQuestionContent] = []
+}
+
+/// A single question posed by AskUserQuestion, with its multiple-choice options.
+struct AskUserQuestionContent: Equatable {
+    let question: String
+    let header: String?
+    let multiSelect: Bool
+    let options: [Option]
+
+    struct Option: Equatable {
+        let label: String
+        let description: String?
+    }
+}
+
+/// The user's parsed response to an AskUserQuestion prompt.
+struct AskUserAnswer: Equatable {
+    let question: String
+    let selection: String
+    let notes: String?
+    let preview: String?
 }
 
 /// A subagent spawned from a parent Claude session. Lives in

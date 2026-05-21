@@ -140,6 +140,14 @@ struct SessionDetailView: View {
                 transcriptLoader.loadIfNeeded(transcriptKey: session.transcriptKey, jsonlPath: jsonlPath)
             }
         }
+        // The detail can stay open while Claude writes more entries; re-check
+        // the JSONL whenever SessionMonitor reports a newer mtime. The loader
+        // is internally idempotent for unchanged files.
+        .onChange(of: session.lastModified) { _, _ in
+            if let jsonlPath = session.jsonlPath {
+                transcriptLoader.loadIfNeeded(transcriptKey: session.transcriptKey, jsonlPath: jsonlPath)
+            }
+        }
     }
 
     // MARK: - Task list
@@ -233,12 +241,55 @@ struct SessionDetailView: View {
                 }
             } else {
                 LazyVStack(alignment: .leading, spacing: 8) {
+                    if let pending = pendingPermissionText {
+                        pendingPermissionPlaceholder(pending)
+                    }
                     ForEach(transcript.reversed()) { message in
                         transcriptBubble(message)
                     }
                 }
             }
         }
+    }
+
+    /// The text describing the pending permission prompt, if the session is
+    /// currently waiting on one whose tool_use has not yet been persisted to
+    /// the JSONL. Returns nil for any other waiting state (e.g., an
+    /// AskUserQuestion, which the transcript already renders).
+    private var pendingPermissionText: String? {
+        guard case .waitingForQuestion(_, let question) = session.status,
+              let question,
+              question.hasPrefix("Permission prompt pending") ||
+              question.hasPrefix("Waiting on") ||
+              question.hasPrefix("Waiting for input") else {
+            return nil
+        }
+        return question
+    }
+
+    private func pendingPermissionPlaceholder(_ text: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 4) {
+                Text("Claude")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.purple)
+                Text("Pending")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+            HStack(spacing: 6) {
+                Image(systemName: "hand.raised.fill")
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+                Text(text)
+                    .font(.callout)
+                    .textSelection(.enabled)
+            }
+        }
+        .padding(8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.orange.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
     private func transcriptBubble(_ message: TranscriptMessage) -> some View {
@@ -266,20 +317,31 @@ struct SessionDetailView: View {
             // Tool calls
             if !message.toolCalls.isEmpty {
                 ForEach(Array(message.toolCalls.enumerated()), id: \.offset) { _, call in
-                    HStack(spacing: 4) {
-                        Image(systemName: "wrench.and.screwdriver")
-                            .font(.caption2)
-                        Text(call.name)
-                            .font(.caption.weight(.medium))
-                        if let summary = call.summary {
-                            Text(summary)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                                .truncationMode(.middle)
+                    if !call.askQuestions.isEmpty {
+                        askQuestionView(call.askQuestions)
+                    } else {
+                        HStack(spacing: 4) {
+                            Image(systemName: "wrench.and.screwdriver")
+                                .font(.caption2)
+                            Text(call.name)
+                                .font(.caption.weight(.medium))
+                            if let summary = call.summary {
+                                Text(summary)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                            }
                         }
+                        .foregroundStyle(.secondary)
                     }
-                    .foregroundStyle(.secondary)
+                }
+            }
+
+            // AskUserQuestion answers (on user messages)
+            if !message.askAnswers.isEmpty {
+                ForEach(Array(message.askAnswers.enumerated()), id: \.offset) { _, answer in
+                    askAnswerView(answer)
                 }
             }
         }
@@ -298,5 +360,93 @@ struct SessionDetailView: View {
             return "\(title) (\(elapsed.formattedDuration))"
         }
         return title
+    }
+}
+
+private extension SessionDetailView {
+    /// Renders the full question + options block when the assistant invokes
+    /// AskUserQuestion. One sub-block per question (the tool supports multiple).
+    @ViewBuilder
+    func askQuestionView(_ questions: [AskUserQuestionContent]) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 4) {
+                Image(systemName: "questionmark.circle")
+                    .font(.caption2)
+                Text("AskUserQuestion")
+                    .font(.caption.weight(.medium))
+            }
+            .foregroundStyle(.secondary)
+
+            ForEach(Array(questions.enumerated()), id: \.offset) { _, q in
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(q.question)
+                        .font(.callout)
+                        .textSelection(.enabled)
+                    if q.multiSelect {
+                        Text("(multi-select)")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    }
+                    ForEach(Array(q.options.enumerated()), id: \.offset) { _, opt in
+                        HStack(alignment: .top, spacing: 6) {
+                            Image(systemName: q.multiSelect ? "square" : "circle")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                                .padding(.top, 2)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(opt.label)
+                                    .font(.caption.weight(.medium))
+                                if let description = opt.description, !description.isEmpty {
+                                    Text(description)
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                    }
+                }
+                .padding(8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(.quaternary.opacity(0.4))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+            }
+        }
+    }
+
+    /// Renders the user's selection in response to an AskUserQuestion.
+    @ViewBuilder
+    func askAnswerView(_ answer: AskUserAnswer) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 4) {
+                Image(systemName: "checkmark.circle")
+                    .font(.caption2)
+                Text("Answered")
+                    .font(.caption.weight(.medium))
+            }
+            .foregroundStyle(.secondary)
+            Text(answer.selection)
+                .font(.callout)
+                .textSelection(.enabled)
+            if let notes = answer.notes {
+                Text(notes)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            }
+            if let preview = answer.preview {
+                Text(preview)
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
+                    .padding(6)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(.quaternary.opacity(0.4))
+                    .clipShape(RoundedRectangle(cornerRadius: 4))
+                    .textSelection(.enabled)
+            }
+        }
+        .padding(8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.quaternary.opacity(0.4))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
     }
 }

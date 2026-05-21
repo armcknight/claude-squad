@@ -501,4 +501,244 @@ final class ClaudeSessionDetectorTests: XCTestCase {
         }
     }
 
+    // MARK: - Transcript: AskUserQuestion
+
+    func test_readTranscript_capturesAskUserQuestionStructure() throws {
+        let path = (NSTemporaryDirectory() as NSString)
+            .appendingPathComponent("transcript_ask_\(UUID().uuidString).jsonl")
+        defer { try? FileManager.default.removeItem(atPath: path) }
+
+        let assistantLine = """
+        {"type":"assistant","uuid":"a-1","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu_1","name":"AskUserQuestion","input":{"questions":[{"question":"Which approach?","header":"Branching","multiSelect":false,"options":[{"label":"A","description":"first"},{"label":"B","description":"second"}]},{"question":"Confirm?","options":[{"label":"Yes"}]}]}}]}}
+        """
+        try assistantLine.write(toFile: path, atomically: true, encoding: .utf8)
+
+        let transcript = detector.readTranscript(jsonlPath: path)
+        XCTAssertEqual(transcript.count, 1)
+        let call = try XCTUnwrap(transcript.first?.toolCalls.first)
+        XCTAssertEqual(call.name, "AskUserQuestion")
+        XCTAssertEqual(call.askQuestions.count, 2)
+
+        let first = call.askQuestions[0]
+        XCTAssertEqual(first.question, "Which approach?")
+        XCTAssertEqual(first.header, "Branching")
+        XCTAssertFalse(first.multiSelect)
+        XCTAssertEqual(first.options.map(\.label), ["A", "B"])
+        XCTAssertEqual(first.options.map(\.description), ["first", "second"])
+
+        let second = call.askQuestions[1]
+        XCTAssertEqual(second.question, "Confirm?")
+        XCTAssertEqual(second.options.map(\.label), ["Yes"])
+    }
+
+    func test_readTranscript_parsesUserAnswerFromToolResult() throws {
+        let path = (NSTemporaryDirectory() as NSString)
+            .appendingPathComponent("transcript_answer_\(UUID().uuidString).jsonl")
+        defer { try? FileManager.default.removeItem(atPath: path) }
+
+        let userLine = #"""
+        {"type":"user","uuid":"u-1","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu_1","content":"User has answered your questions: \"Which approach?\"=\"oneof provider fields\" user notes: prefer this one. You can now continue with the user's answers in mind.\n[result-id: r1]"}]}}
+        """#
+        try userLine.write(toFile: path, atomically: true, encoding: .utf8)
+
+        let transcript = detector.readTranscript(jsonlPath: path)
+        XCTAssertEqual(transcript.count, 1)
+        let answer = try XCTUnwrap(transcript.first?.askAnswers.first)
+        XCTAssertEqual(answer.question, "Which approach?")
+        XCTAssertEqual(answer.selection, "oneof provider fields")
+        XCTAssertEqual(answer.notes, "prefer this one")
+        XCTAssertNil(answer.preview)
+    }
+
+    func test_readTranscript_parsesAnswerWithSelectedPreview() throws {
+        let path = (NSTemporaryDirectory() as NSString)
+            .appendingPathComponent("transcript_preview_\(UUID().uuidString).jsonl")
+        defer { try? FileManager.default.removeItem(atPath: path) }
+
+        let userLine = #"""
+        {"type":"user","uuid":"u-2","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu_2","content":"User has answered your questions: \"Proto design?\"=\"oneof provider fields\" selected preview:\nmessage SyncChargeRequest { oneof provider { Stripe stripe = 10; }}\n[result-id: r2]"}]}}
+        """#
+        try userLine.write(toFile: path, atomically: true, encoding: .utf8)
+
+        let transcript = detector.readTranscript(jsonlPath: path)
+        let answer = try XCTUnwrap(transcript.first?.askAnswers.first)
+        XCTAssertEqual(answer.selection, "oneof provider fields")
+        XCTAssertEqual(answer.preview, "message SyncChargeRequest { oneof provider { Stripe stripe = 10; }}")
+        XCTAssertNil(answer.notes)
+    }
+
+    // MARK: - Live session state
+
+    func test_readLiveSessionStates_returnsEmptyForMissingDir() {
+        let bogus = (NSTemporaryDirectory() as NSString)
+            .appendingPathComponent("missing_\(UUID().uuidString)")
+        let states = detector.readLiveSessionStates(claudeDir: bogus)
+        XCTAssertTrue(states.isEmpty)
+    }
+
+    func test_readLiveSessionStates_parsesWaitingSession() throws {
+        let claudeDir = try makeTempClaudeDir()
+        defer { try? FileManager.default.removeItem(atPath: claudeDir) }
+
+        try writeSessionFile(
+            pid: 12345,
+            sessionId: "session-a",
+            status: "waiting",
+            waitingFor: "permission prompt",
+            updatedAtMs: 1_779_311_721_077,
+            in: claudeDir
+        )
+
+        let states = detector.readLiveSessionStates(claudeDir: claudeDir)
+        let state = try XCTUnwrap(states["session-a"])
+        XCTAssertEqual(state.status, "waiting")
+        XCTAssertEqual(state.waitingFor, "permission prompt")
+    }
+
+    func test_readLiveSessionStates_picksMostRecentDuplicate() throws {
+        // If two PIDs claim the same sessionId (e.g., a stale leftover from a
+        // crashed process), keep the most recently updated state.
+        let claudeDir = try makeTempClaudeDir()
+        defer { try? FileManager.default.removeItem(atPath: claudeDir) }
+
+        try writeSessionFile(pid: 1, sessionId: "dup", status: "idle",
+                             waitingFor: nil, updatedAtMs: 1_000_000,
+                             in: claudeDir)
+        try writeSessionFile(pid: 2, sessionId: "dup", status: "waiting",
+                             waitingFor: "permission prompt",
+                             updatedAtMs: 2_000_000, in: claudeDir)
+
+        let states = detector.readLiveSessionStates(claudeDir: claudeDir)
+        XCTAssertEqual(states["dup"]?.status, "waiting")
+    }
+
+    func test_waitingQuestionText_mapsKnownWaitingFor() {
+        let permission = ClaudeSessionDetector.LiveSessionState(
+            sessionId: "s", status: "waiting",
+            waitingFor: "permission prompt", updatedAt: Date()
+        )
+        XCTAssertEqual(detector.waitingQuestionText(for: permission),
+                       "Permission prompt pending — see terminal")
+
+        let other = ClaudeSessionDetector.LiveSessionState(
+            sessionId: "s", status: "waiting",
+            waitingFor: "user input", updatedAt: Date()
+        )
+        XCTAssertEqual(detector.waitingQuestionText(for: other),
+                       "Waiting on user input — see terminal")
+
+        let none = ClaudeSessionDetector.LiveSessionState(
+            sessionId: "s", status: "waiting",
+            waitingFor: nil, updatedAt: Date()
+        )
+        XCTAssertEqual(detector.waitingQuestionText(for: none),
+                       "Waiting for input — see terminal")
+    }
+
+    func test_waitingQuestionText_isNilForBusySession() {
+        let busy = ClaudeSessionDetector.LiveSessionState(
+            sessionId: "s", status: "busy", waitingFor: nil, updatedAt: Date()
+        )
+        XCTAssertNil(detector.waitingQuestionText(for: busy))
+    }
+
+    func test_overlay_overridesInterruptedWithWaitingForQuestion() {
+        let now = Date()
+        let session = makeSession(id: "s1", status: .interrupted(lastActivity: now), lastModified: now)
+        let liveStates = ["s1": ClaudeSessionDetector.LiveSessionState(
+            sessionId: "s1", status: "waiting",
+            waitingFor: "permission prompt", updatedAt: now
+        )]
+        let updated = detector.applyingLiveStateOverlay(session, liveStates: liveStates)
+        guard case .waitingForQuestion(_, let question) = updated.status else {
+            return XCTFail("expected waitingForQuestion, got \(updated.status)")
+        }
+        XCTAssertEqual(question, "Permission prompt pending — see terminal")
+    }
+
+    func test_overlay_leavesUnaffectedSessionsAlone() {
+        let now = Date()
+        let session = makeSession(id: "s1", status: .running, lastModified: now)
+        let updated = detector.applyingLiveStateOverlay(session, liveStates: [:])
+        XCTAssertEqual(updated.status.sectionTitle, session.status.sectionTitle)
+    }
+
+    func test_overlay_preservesExistingAskUserQuestion() {
+        // If JSONL already shows a real AskUserQuestion, don't replace its
+        // (more informative) question text with the generic placeholder.
+        let now = Date()
+        let session = makeSession(
+            id: "s1",
+            status: .waitingForQuestion(since: now, question: "Which approach?"),
+            lastModified: now
+        )
+        let liveStates = ["s1": ClaudeSessionDetector.LiveSessionState(
+            sessionId: "s1", status: "waiting",
+            waitingFor: "permission prompt", updatedAt: now
+        )]
+        let updated = detector.applyingLiveStateOverlay(session, liveStates: liveStates)
+        guard case .waitingForQuestion(_, let q) = updated.status else {
+            return XCTFail("expected waitingForQuestion")
+        }
+        XCTAssertEqual(q, "Which approach?")
+    }
+
+    // MARK: - Test helpers
+
+    private func makeTempClaudeDir() throws -> String {
+        let dir = (NSTemporaryDirectory() as NSString)
+            .appendingPathComponent("claude_test_\(UUID().uuidString)")
+        try FileManager.default.createDirectory(
+            atPath: (dir as NSString).appendingPathComponent("sessions"),
+            withIntermediateDirectories: true
+        )
+        return dir
+    }
+
+    private func writeSessionFile(
+        pid: Int, sessionId: String, status: String,
+        waitingFor: String?, updatedAtMs: Int, in claudeDir: String
+    ) throws {
+        var json: [String: Any] = [
+            "pid": pid,
+            "sessionId": sessionId,
+            "status": status,
+            "updatedAt": updatedAtMs
+        ]
+        if let waitingFor { json["waitingFor"] = waitingFor }
+        let data = try JSONSerialization.data(withJSONObject: json)
+        let path = (claudeDir as NSString)
+            .appendingPathComponent("sessions/\(pid).json")
+        try data.write(to: URL(fileURLWithPath: path))
+    }
+
+    private func makeSession(id: String, status: SessionStatus, lastModified: Date) -> ClaudeSession {
+        ClaudeSession(
+            id: id,
+            projectPath: "/tmp/proj",
+            gitBranch: nil,
+            gitStatus: nil,
+            slug: nil,
+            ownStatus: status,
+            status: status,
+            taskSummary: nil,
+            lastModified: lastModified
+        )
+    }
+
+    func test_readTranscript_keepsLegacySummaryForAskUserQuestion() throws {
+        // Sanity: even with structured questions, the one-line summary should still
+        // surface the first question (used by other code paths like status detection).
+        let path = (NSTemporaryDirectory() as NSString)
+            .appendingPathComponent("transcript_summary_\(UUID().uuidString).jsonl")
+        defer { try? FileManager.default.removeItem(atPath: path) }
+
+        let assistantLine = """
+        {"type":"assistant","uuid":"a-2","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu_3","name":"AskUserQuestion","input":{"questions":[{"question":"Top-level question?"}]}}]}}
+        """
+        try assistantLine.write(toFile: path, atomically: true, encoding: .utf8)
+
+        let transcript = detector.readTranscript(jsonlPath: path)
+        XCTAssertEqual(transcript.first?.toolCalls.first?.summary, "Top-level question?")
+    }
 }
