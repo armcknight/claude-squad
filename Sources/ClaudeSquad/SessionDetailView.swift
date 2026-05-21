@@ -132,12 +132,12 @@ struct SessionDetailView: View {
         .accessibilityIdentifier("session-detail")
         .onAppear {
             if let jsonlPath = session.jsonlPath {
-                transcriptLoader.loadIfNeeded(sessionId: session.id, jsonlPath: jsonlPath)
+                transcriptLoader.loadIfNeeded(transcriptKey: session.transcriptKey, jsonlPath: jsonlPath)
             }
         }
         .onChange(of: session.id) { _, _ in
             if let jsonlPath = session.jsonlPath {
-                transcriptLoader.loadIfNeeded(sessionId: session.id, jsonlPath: jsonlPath)
+                transcriptLoader.loadIfNeeded(transcriptKey: session.transcriptKey, jsonlPath: jsonlPath)
             }
         }
     }
@@ -205,7 +205,7 @@ struct SessionDetailView: View {
     /// Use cached transcript from the loader (available immediately) over the
     /// session's copy (only updated on the next refresh cycle).
     private var transcript: [TranscriptMessage] {
-        transcriptLoader.cachedTranscripts[session.id] ?? session.transcript
+        transcriptLoader.cachedTranscripts[session.transcriptKey] ?? session.transcript
     }
 
     private var transcriptSection: some View {
@@ -222,7 +222,7 @@ struct SessionDetailView: View {
 
             if transcript.isEmpty {
                 let progress: Double = {
-                    if case .loading(let p) = transcriptLoader.loadStates[session.id] { return p }
+                    if case .loading(let p) = transcriptLoader.loadStates[session.transcriptKey] { return p }
                     return 0.0
                 }()
                 VStack(spacing: 4) {

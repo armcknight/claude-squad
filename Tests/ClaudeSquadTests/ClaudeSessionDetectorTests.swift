@@ -305,67 +305,173 @@ final class ClaudeSessionDetectorTests: XCTestCase {
 
     // MARK: - Subagent delegation
 
-    func test_isWaitingOnSubagent_trueForAgentToolUseWithoutResult() {
-        let lines = [
-            "{\"type\": \"assistant\", \"message\": {\"role\": \"assistant\", \"content\": [{\"type\": \"tool_use\", \"name\": \"Agent\", \"id\": \"toolu_x\"}]}}"
-        ]
-        XCTAssertTrue(detector.isWaitingOnSubagent(tailLines: lines))
-    }
+    // MARK: - Subagent detection
 
-    func test_isWaitingOnSubagent_trueForTaskToolUseWithoutResult() {
-        let lines = [
-            "{\"type\": \"assistant\", \"message\": {\"role\": \"assistant\", \"content\": [{\"type\": \"tool_use\", \"name\": \"Task\", \"id\": \"toolu_y\"}]}}"
-        ]
-        XCTAssertTrue(detector.isWaitingOnSubagent(tailLines: lines))
-    }
-
-    func test_isWaitingOnSubagent_falseWhenToolResultFollows() {
-        let lines = [
-            "{\"type\": \"assistant\", \"message\": {\"role\": \"assistant\", \"content\": [{\"type\": \"tool_use\", \"name\": \"Agent\", \"id\": \"toolu_x\"}]}}",
-            "{\"type\": \"user\", \"message\": {\"role\": \"user\", \"content\": [{\"type\": \"tool_result\", \"tool_use_id\": \"toolu_x\", \"content\": \"done\"}]}}"
-        ]
-        XCTAssertFalse(detector.isWaitingOnSubagent(tailLines: lines))
-    }
-
-    func test_isWaitingOnSubagent_falseForNonAgentTool() {
-        let lines = [
-            "{\"type\": \"assistant\", \"message\": {\"role\": \"assistant\", \"content\": [{\"type\": \"tool_use\", \"name\": \"Bash\", \"id\": \"toolu_z\"}]}}"
-        ]
-        XCTAssertFalse(detector.isWaitingOnSubagent(tailLines: lines))
-    }
-
-    func test_isWaitingOnSubagent_falseForTextOnly() {
-        let lines = [
-            "{\"type\": \"assistant\", \"message\": {\"role\": \"assistant\", \"content\": [{\"type\": \"text\", \"text\": \"hi\"}]}}"
-        ]
-        XCTAssertFalse(detector.isWaitingOnSubagent(tailLines: lines))
-    }
-
-    func test_freshestSubagentJSONL_picksMostRecent() throws {
+    /// Helper: build a minimal session JSONL with the given trailing assistant
+    /// content block, plus subagent JSONLs as described, and run the detector
+    /// against it. Returns the resulting `ClaudeSession`.
+    private func makeSessionTree(
+        parentLastBlock: String,
+        subagents: [(agentId: String, agentType: String, description: String, slug: String, lastBlock: String, nested: [(agentId: String, agentType: String, description: String, slug: String, lastBlock: String)])] = []
+    ) throws -> (session: ClaudeSession, root: String) {
         let root = (NSTemporaryDirectory() as NSString)
-            .appendingPathComponent("subagent_test_\(UUID().uuidString)")
+            .appendingPathComponent("detector_test_\(UUID().uuidString)")
         let mainPath = root + ".jsonl"
-        let subDir = (root as NSString).appendingPathComponent("subagents")
-        try FileManager.default.createDirectory(atPath: subDir, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(atPath: root)
-                try? FileManager.default.removeItem(atPath: mainPath) }
+        try FileManager.default.createDirectory(atPath: root, withIntermediateDirectories: true)
 
-        try "{}\n".write(toFile: mainPath, atomically: true, encoding: .utf8)
-        let older = (subDir as NSString).appendingPathComponent("agent-older.jsonl")
-        let newer = (subDir as NSString).appendingPathComponent("agent-newer.jsonl")
-        try "{}\n".write(toFile: older, atomically: true, encoding: .utf8)
-        try "{}\n".write(toFile: newer, atomically: true, encoding: .utf8)
-        // Force the older file's modification date into the past.
-        try FileManager.default.setAttributes(
-            [.modificationDate: Date().addingTimeInterval(-3600)], ofItemAtPath: older)
+        let parentLines = [
+            "{\"type\":\"user\",\"cwd\":\"/tmp/test-proj\",\"sessionId\":\"sess1\",\"message\":{\"role\":\"user\",\"content\":\"go\"}}",
+            "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[\(parentLastBlock)]}}"
+        ]
+        try parentLines.joined(separator: "\n").write(toFile: mainPath, atomically: true, encoding: .utf8)
 
-        let result = detector.freshestSubagentJSONL(parentJSONLPath: mainPath)
-        XCTAssertEqual(result?.path, newer)
+        if !subagents.isEmpty {
+            let subDir = (root as NSString).appendingPathComponent("subagents")
+            try FileManager.default.createDirectory(atPath: subDir, withIntermediateDirectories: true)
+            for sub in subagents {
+                let subPath = (subDir as NSString).appendingPathComponent("agent-\(sub.agentId).jsonl")
+                let metaPath = (subDir as NSString).appendingPathComponent("agent-\(sub.agentId).meta.json")
+                let subLines = [
+                    "{\"type\":\"user\",\"isSidechain\":true,\"cwd\":\"/tmp/test-proj\",\"sessionId\":\"sess1\",\"agentId\":\"\(sub.agentId)\",\"slug\":\"\(sub.slug)\",\"message\":{\"role\":\"user\",\"content\":\"launch prompt for \(sub.agentId)\"}}",
+                    "{\"type\":\"assistant\",\"isSidechain\":true,\"agentId\":\"\(sub.agentId)\",\"message\":{\"role\":\"assistant\",\"content\":[\(sub.lastBlock)]}}"
+                ]
+                try subLines.joined(separator: "\n").write(toFile: subPath, atomically: true, encoding: .utf8)
+                let metaJSON = "{\"agentType\":\"\(sub.agentType)\",\"description\":\"\(sub.description)\"}"
+                try metaJSON.write(toFile: metaPath, atomically: true, encoding: .utf8)
+
+                if !sub.nested.isEmpty {
+                    let nestedDir = (subDir as NSString).appendingPathComponent("agent-\(sub.agentId)/subagents")
+                    try FileManager.default.createDirectory(atPath: nestedDir, withIntermediateDirectories: true)
+                    for n in sub.nested {
+                        let nPath = (nestedDir as NSString).appendingPathComponent("agent-\(n.agentId).jsonl")
+                        let nMeta = (nestedDir as NSString).appendingPathComponent("agent-\(n.agentId).meta.json")
+                        let nLines = [
+                            "{\"type\":\"user\",\"isSidechain\":true,\"cwd\":\"/tmp/test-proj\",\"sessionId\":\"sess1\",\"agentId\":\"\(n.agentId)\",\"slug\":\"\(n.slug)\",\"message\":{\"role\":\"user\",\"content\":\"launch prompt for \(n.agentId)\"}}",
+                            "{\"type\":\"assistant\",\"isSidechain\":true,\"agentId\":\"\(n.agentId)\",\"message\":{\"role\":\"assistant\",\"content\":[\(n.lastBlock)]}}"
+                        ]
+                        try nLines.joined(separator: "\n").write(toFile: nPath, atomically: true, encoding: .utf8)
+                        let nMetaJSON = "{\"agentType\":\"\(n.agentType)\",\"description\":\"\(n.description)\"}"
+                        try nMetaJSON.write(toFile: nMeta, atomically: true, encoding: .utf8)
+                    }
+                }
+            }
+        }
+
+        // Touch parent JSONL so it appears fresh enough for "running" status when
+        // its last block is a still-pending tool_use.
+        try FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: mainPath)
+
+        guard let session = detector.analyzeSession(jsonlPath: mainPath, claudeDir: "/tmp/no-claude-dir") else {
+            throw NSError(domain: "test", code: 0, userInfo: [NSLocalizedDescriptionKey: "analyzeSession returned nil"])
+        }
+        return (session, root)
     }
 
-    func test_freshestSubagentJSONL_nilWhenNoSubagentDir() {
-        let result = detector.freshestSubagentJSONL(parentJSONLPath: "/nonexistent/foo.jsonl")
-        XCTAssertNil(result)
+    func test_subagents_areDetectedWithMetadata() throws {
+        let (session, root) = try makeSessionTree(
+            parentLastBlock: "{\"type\":\"tool_use\",\"id\":\"t1\",\"name\":\"Agent\"}",
+            subagents: [
+                (agentId: "subA", agentType: "Explore", description: "look around",
+                 slug: "twilight-coral-fern",
+                 lastBlock: "{\"type\":\"tool_use\",\"name\":\"Bash\",\"id\":\"x\"}",
+                 nested: [])
+            ]
+        )
+        defer { try? FileManager.default.removeItem(atPath: root)
+                try? FileManager.default.removeItem(atPath: root + ".jsonl") }
+
+        XCTAssertEqual(session.subagents.count, 1)
+        let sub = session.subagents[0]
+        XCTAssertEqual(sub.id, "subA")
+        XCTAssertEqual(sub.subagentType, "Explore")
+        XCTAssertEqual(sub.taskDescription, "look around")
+        XCTAssertEqual(sub.slug, "twilight-coral-fern")
+        XCTAssertEqual(sub.launchPrompt, "launch prompt for subA")
+        XCTAssertEqual(sub.displayLabel, "Explore · twilight-coral-fern")
+    }
+
+    func test_subagents_areDetectedRecursively() throws {
+        let (session, root) = try makeSessionTree(
+            parentLastBlock: "{\"type\":\"tool_use\",\"id\":\"t1\",\"name\":\"Agent\"}",
+            subagents: [
+                (agentId: "outerSub", agentType: "Explore", description: "outer",
+                 slug: "outer-slug",
+                 lastBlock: "{\"type\":\"tool_use\",\"name\":\"Agent\",\"id\":\"x\"}",
+                 nested: [
+                    (agentId: "innerSub", agentType: "general-purpose", description: "inner",
+                     slug: "inner-slug",
+                     lastBlock: "{\"type\":\"tool_use\",\"name\":\"Bash\",\"id\":\"y\"}")
+                 ])
+            ]
+        )
+        defer { try? FileManager.default.removeItem(atPath: root)
+                try? FileManager.default.removeItem(atPath: root + ".jsonl") }
+
+        XCTAssertEqual(session.subagents.count, 1)
+        let outer = session.subagents[0]
+        XCTAssertEqual(outer.id, "outerSub")
+        XCTAssertEqual(outer.subagents.count, 1)
+        XCTAssertEqual(outer.subagents[0].id, "innerSub")
+        XCTAssertEqual(outer.subagents[0].subagentType, "general-purpose")
+    }
+
+    func test_rollUpStatus_picksHighestPriorityDescendant() throws {
+        // Parent: Agent tool_use, fresh → ownStatus = running.
+        // Subagent: AskUserQuestion → waitingForQuestion.
+        let askBlock = "{\"type\":\"tool_use\",\"name\":\"AskUserQuestion\",\"id\":\"q\",\"input\":{\"questions\":[{\"question\":\"pick?\"}]}}"
+        let (session, root) = try makeSessionTree(
+            parentLastBlock: "{\"type\":\"tool_use\",\"id\":\"t1\",\"name\":\"Agent\"}",
+            subagents: [
+                (agentId: "sub1", agentType: "general-purpose", description: "ask",
+                 slug: "slug1", lastBlock: askBlock, nested: [])
+            ]
+        )
+        defer { try? FileManager.default.removeItem(atPath: root)
+                try? FileManager.default.removeItem(atPath: root + ".jsonl") }
+
+        // Parent's own status is running (Agent tool_use, fresh).
+        if case .running = session.ownStatus { } else {
+            XCTFail("parent ownStatus should be running, got \(session.ownStatus)")
+        }
+        // Effective status rolls up to waitingForQuestion from the subagent.
+        if case .waitingForQuestion = session.status { } else {
+            XCTFail("rolled-up status should be waitingForQuestion, got \(session.status)")
+        }
+    }
+
+    func test_rollUpStatus_picksFromDeeplyNestedDescendant() throws {
+        let askBlock = "{\"type\":\"tool_use\",\"name\":\"AskUserQuestion\",\"id\":\"q\",\"input\":{\"questions\":[{\"question\":\"pick?\"}]}}"
+        let (session, root) = try makeSessionTree(
+            parentLastBlock: "{\"type\":\"tool_use\",\"id\":\"t1\",\"name\":\"Agent\"}",
+            subagents: [
+                (agentId: "outerSub", agentType: "Explore", description: "outer",
+                 slug: "outer-slug",
+                 lastBlock: "{\"type\":\"tool_use\",\"name\":\"Agent\",\"id\":\"x\"}",
+                 nested: [
+                    (agentId: "innerSub", agentType: "general-purpose", description: "inner",
+                     slug: "inner-slug", lastBlock: askBlock)
+                 ])
+            ]
+        )
+        defer { try? FileManager.default.removeItem(atPath: root)
+                try? FileManager.default.removeItem(atPath: root + ".jsonl") }
+
+        if case .waitingForQuestion = session.status { } else {
+            XCTFail("rolled-up status should be waitingForQuestion from nested sub, got \(session.status)")
+        }
+    }
+
+    func test_readLaunchPrompt_returnsFirstUserContent() throws {
+        let path = (NSTemporaryDirectory() as NSString)
+            .appendingPathComponent("launch_\(UUID().uuidString).jsonl")
+        defer { try? FileManager.default.removeItem(atPath: path) }
+        let content = [
+            "{\"type\":\"user\",\"isSidechain\":true,\"cwd\":\"/x\",\"sessionId\":\"s\",\"agentId\":\"a\",\"message\":{\"role\":\"user\",\"content\":\"Please do the thing.\"}}",
+            "{\"type\":\"assistant\",\"agentId\":\"a\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"OK\"}]}}"
+        ].joined(separator: "\n")
+        try content.write(toFile: path, atomically: true, encoding: .utf8)
+
+        XCTAssertEqual(detector.readLaunchPrompt(jsonlPath: path), "Please do the thing.")
     }
 
     func test_effectiveModDate_usesSubagentWhenNewer() throws {
@@ -395,38 +501,4 @@ final class ClaudeSessionDetectorTests: XCTestCase {
         }
     }
 
-    func test_resolveStatusSource_descendsIntoActiveSubagent() throws {
-        let root = (NSTemporaryDirectory() as NSString)
-            .appendingPathComponent("resolve_test_\(UUID().uuidString)")
-        let mainPath = root + ".jsonl"
-        let subDir = (root as NSString).appendingPathComponent("subagents")
-        try FileManager.default.createDirectory(atPath: subDir, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(atPath: root)
-                try? FileManager.default.removeItem(atPath: mainPath) }
-
-        // Main: last assistant block is an Agent tool_use with no following tool_result.
-        let mainContent = "{\"type\": \"assistant\", \"message\": {\"role\": \"assistant\", \"content\": [{\"type\": \"tool_use\", \"name\": \"Agent\", \"id\": \"toolu_main\"}]}}\n"
-        try mainContent.write(toFile: mainPath, atomically: true, encoding: .utf8)
-        // Subagent: actively writing — last line is a Bash tool_use.
-        let subPath = (subDir as NSString).appendingPathComponent("agent-active.jsonl")
-        let subContent = "{\"type\": \"assistant\", \"message\": {\"role\": \"assistant\", \"content\": [{\"type\": \"tool_use\", \"name\": \"Bash\", \"id\": \"toolu_bash\"}]}}\n"
-        try subContent.write(toFile: subPath, atomically: true, encoding: .utf8)
-
-        let resolved = detector.resolveStatusSource(jsonlPath: mainPath, fallbackModDate: Date())
-        XCTAssertEqual(resolved.path, subPath)
-    }
-
-    func test_resolveStatusSource_staysOnMainWhenNotWaitingOnSubagent() throws {
-        let root = (NSTemporaryDirectory() as NSString)
-            .appendingPathComponent("resolve_test2_\(UUID().uuidString)")
-        let mainPath = root + ".jsonl"
-        defer { try? FileManager.default.removeItem(atPath: mainPath) }
-
-        // Main: last assistant block is plain text.
-        let mainContent = "{\"type\": \"assistant\", \"message\": {\"role\": \"assistant\", \"content\": [{\"type\": \"text\", \"text\": \"hi\"}]}}\n"
-        try mainContent.write(toFile: mainPath, atomically: true, encoding: .utf8)
-
-        let resolved = detector.resolveStatusSource(jsonlPath: mainPath, fallbackModDate: Date())
-        XCTAssertEqual(resolved.path, mainPath)
-    }
 }

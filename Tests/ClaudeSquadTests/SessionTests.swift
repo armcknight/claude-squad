@@ -35,9 +35,9 @@ final class SessionTests: XCTestCase {
 
     func test_sortPriority() {
         XCTAssertEqual(SessionStatus.waitingForQuestion(since: Date(), question: nil).sortPriority, 0)
-        XCTAssertEqual(SessionStatus.waitingIdle(since: Date()).sortPriority, 1)
-        XCTAssertEqual(SessionStatus.running.sortPriority, 2)
-        XCTAssertEqual(SessionStatus.interrupted(lastActivity: Date()).sortPriority, 3)
+        XCTAssertEqual(SessionStatus.interrupted(lastActivity: Date()).sortPriority, 1)
+        XCTAssertEqual(SessionStatus.waitingIdle(since: Date()).sortPriority, 2)
+        XCTAssertEqual(SessionStatus.running.sortPriority, 3)
         XCTAssertEqual(SessionStatus.inactive(lastActivity: Date()).sortPriority, 4)
     }
 
@@ -45,12 +45,12 @@ final class SessionTests: XCTestCase {
 
     func test_waitingForQuestionSortsFirst() {
         let question = makeSession(id: "a", status: .waitingForQuestion(since: Date(), question: nil))
-        let idle = makeSession(id: "b", status: .waitingIdle(since: Date()))
-        let running = makeSession(id: "c", status: .running)
-        let interrupted = makeSession(id: "d", status: .interrupted(lastActivity: Date()))
+        let interrupted = makeSession(id: "b", status: .interrupted(lastActivity: Date()))
+        let idle = makeSession(id: "c", status: .waitingIdle(since: Date()))
+        let running = makeSession(id: "d", status: .running)
         let inactive = makeSession(id: "e", status: .inactive(lastActivity: Date()))
 
-        let sorted = [inactive, running, interrupted, idle, question].sorted()
+        let sorted = [inactive, running, idle, interrupted, question].sorted()
         XCTAssertEqual(sorted.map(\.id), ["a", "b", "c", "d", "e"])
     }
 
@@ -85,6 +85,7 @@ final class SessionTests: XCTestCase {
         ClaudeSession(
             id: id,
             projectPath: "/Users/test/test-project",
+            ownStatus: status,
             status: status,
             lastModified: Date()
         )

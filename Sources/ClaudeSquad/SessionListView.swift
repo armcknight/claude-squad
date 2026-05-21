@@ -3,11 +3,11 @@ import SwiftUI
 /// Main window content — sidebar list of sessions grouped by status, with a detail pane.
 struct SessionListView: View {
     @ObservedObject var monitor: SessionMonitor
-    @State private var selectedSession: ClaudeSession?
+    @State private var selection: SidebarSelection?
 
     var body: some View {
         NavigationSplitView {
-            List(selection: $selectedSession) {
+            List(selection: $selection) {
                 ForEach(sectionOrder, id: \.self) { priority in
                     if let sessions = groupedSessions[priority], !sessions.isEmpty {
                         let status = sessions.first!.status
@@ -68,16 +68,25 @@ struct SessionListView: View {
                 }
             }
         } detail: {
-            if let selected = selectedSession,
-               let session = monitor.sessions.first(where: { $0.id == selected.id }) {
+            detailPane
+        }
+    }
+
+    @ViewBuilder
+    private var detailPane: some View {
+        if let selection, let target = monitor.sessions.find(selection) {
+            switch target {
+            case .session(let session):
                 SessionDetailView(session: session, monitor: monitor, transcriptLoader: monitor.transcriptLoader)
-            } else {
-                ContentUnavailableView(
-                    "Select a Session",
-                    systemImage: "sidebar.leading",
-                    description: Text("Choose a session from the sidebar to view details.")
-                )
+            case .subagent(let parent, let subagent):
+                SubagentDetailView(parent: parent, subagent: subagent, transcriptLoader: monitor.transcriptLoader)
             }
+        } else {
+            ContentUnavailableView(
+                "Select a Session",
+                systemImage: "sidebar.leading",
+                description: Text("Choose a session from the sidebar to view details.")
+            )
         }
     }
 
@@ -85,11 +94,14 @@ struct SessionListView: View {
 
     private func pathTreeView(node: PathTreeNode, priority: Int) -> AnyView {
         if node.children.isEmpty, let session = node.sessions.first, node.sessions.count == 1 {
-            // Leaf: single session with no children — show full row
+            // Leaf: single session with no children — show full row plus subagents
             return AnyView(
-                SessionRowView(session: session, displayNameOverride: node.displayLabel)
-                    .tag(session)
-                    .accessibilityIdentifier("session-row-\(session.id)")
+                Group {
+                    SessionRowView(session: session, displayNameOverride: node.displayLabel)
+                        .tag(SidebarSelection.session(sessionId: session.id))
+                        .accessibilityIdentifier("session-row-\(session.id)")
+                    subagentRows(for: session.subagents, indentLevel: 1)
+                }
             )
         } else if node.sessions.isEmpty && node.children.count == 1 {
             // Pass-through: single child, no sessions — skip rendering this node
@@ -126,10 +138,13 @@ struct SessionListView: View {
                 if isExpanded {
                     // Sessions directly at this directory level
                     ForEach(node.sessions) { session in
-                        SessionRowView(session: session, displayNameOverride: session.projectName)
-                            .tag(session)
-                            .accessibilityIdentifier("session-row-\(session.id)")
-                            .padding(.leading, 8)
+                        Group {
+                            SessionRowView(session: session, displayNameOverride: session.projectName)
+                                .tag(SidebarSelection.session(sessionId: session.id))
+                                .accessibilityIdentifier("session-row-\(session.id)")
+                            subagentRows(for: session.subagents, indentLevel: 1)
+                        }
+                        .padding(.leading, 8)
                     }
                     // Child directories
                     ForEach(node.children, id: \.id) { child in
@@ -139,6 +154,37 @@ struct SessionListView: View {
                 }
             })
         }
+    }
+
+    /// Renders subagent rows for a subtree by first flattening into
+    /// `(subagent, depth)` pairs, then emitting a single `ForEach`. Done this
+    /// way to avoid SwiftUI's self-referential opaque-return-type restriction
+    /// on recursive `@ViewBuilder` functions.
+    @ViewBuilder
+    private func subagentRows(for subagents: [Subagent], indentLevel: Int) -> some View {
+        let flattened = flattenSubagents(subagents, startingDepth: indentLevel)
+        ForEach(flattened, id: \.subagent.id) { entry in
+            SubagentRowView(subagent: entry.subagent)
+                .tag(SidebarSelection.subagent(agentId: entry.subagent.id))
+                .accessibilityIdentifier("subagent-row-\(entry.subagent.id)")
+                .padding(.leading, CGFloat(12 * entry.depth))
+        }
+    }
+
+    private struct FlattenedSubagent {
+        let subagent: Subagent
+        let depth: Int
+    }
+
+    private func flattenSubagents(_ subagents: [Subagent], startingDepth: Int) -> [FlattenedSubagent] {
+        var result: [FlattenedSubagent] = []
+        for sub in subagents {
+            result.append(FlattenedSubagent(subagent: sub, depth: startingDepth))
+            if !sub.subagents.isEmpty {
+                result.append(contentsOf: flattenSubagents(sub.subagents, startingDepth: startingDepth + 1))
+            }
+        }
+        return result
     }
 
     // MARK: - State

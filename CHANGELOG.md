@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Added
+- Subagents now appear as their own indented rows beneath the session that launched them, with their own status icon, type, slug, elapsed time, and full transcript in the detail pane. Selecting a subagent shows its launch prompt (in place of the parent's project/branch, which it shares) and its own conversation. Nested subagents indent further. A parent session's effective sidebar status is rolled up from itself and all descendants using the priority order: needs input > interrupted > idle > running > inactive.
+
 ### Fixed
 - Session status now reflects activity inside running subagents. Previously, sessions invoking a long `Agent`/`Task` call would appear stuck in "Needs Input" because the detector only watched the top-level JSONL, and approval prompts raised by the subagent itself were invisible.
 

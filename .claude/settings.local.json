@@ -39,7 +39,8 @@
       "mcp__XcodeBuildMCP__build_macos",
       "mcp__XcodeBuildMCP__test_macos",
       "Bash(direnv exec . linctl issue get:*)",
-      "Bash(direnv exec . linctl issue update:*)"
+      "Bash(direnv exec . linctl issue update:*)",
+      "Bash(git check-ignore *)"
     ],
     "deny": []
   }

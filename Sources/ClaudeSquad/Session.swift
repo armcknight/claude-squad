@@ -115,13 +115,17 @@ enum SessionStatus: Equatable {
     }
 
     /// Sort priority: lower = sorts first.
-    /// waitingForQuestion > waitingIdle > running > interrupted > inactive
+    /// waitingForQuestion > interrupted > waitingIdle > running > inactive
+    /// (Interrupted ranks above idle because an abandoned session usually
+    /// demands more attention than a normally-idle one. This same ordering
+    /// is used to roll a session's status up from its subagents — see
+    /// `ClaudeSession.status` vs `ownStatus`.)
     var sortPriority: Int {
         switch self {
         case .waitingForQuestion: return 0
-        case .waitingIdle: return 1
-        case .running: return 2
-        case .interrupted: return 3
+        case .interrupted: return 1
+        case .waitingIdle: return 2
+        case .running: return 3
         case .inactive: return 4
         }
     }
@@ -159,6 +163,116 @@ struct ToolCallSummary: Equatable {
     let summary: String?
 }
 
+/// A subagent spawned from a parent Claude session. Lives in
+/// `<parentJSONL_without_ext>/subagents/agent-<agentId>.jsonl`. Subagents
+/// inherit the parent's project path and git branch (per CLA-7) so those
+/// fields are omitted here.
+struct Subagent: Identifiable, Equatable, Hashable {
+    /// The subagent's `agentId` from the JSONL (used as `id`).
+    let id: String
+
+    /// Human-friendly short name from the JSONL `slug` field.
+    var slug: String?
+
+    /// Subagent type from the `.meta.json` `agentType` field (e.g. "Explore", "general-purpose").
+    var subagentType: String?
+
+    /// Short description of the subagent's task from the `.meta.json` `description` field.
+    var taskDescription: String?
+
+    /// Full launch prompt (the first user message in the subagent JSONL).
+    var launchPrompt: String?
+
+    /// Current state of the subagent.
+    var status: SessionStatus
+
+    /// Conversation transcript messages.
+    var transcript: [TranscriptMessage] = []
+
+    /// Path to this subagent's JSONL file.
+    var jsonlPath: String
+
+    /// Modification time of the JSONL file.
+    var lastModified: Date
+
+    /// Subagents spawned by this subagent (recursive).
+    var subagents: [Subagent] = []
+
+    /// Display label: `subagentType · slug`, falling back to whichever is available.
+    var displayLabel: String {
+        switch (subagentType, slug) {
+        case let (type?, slug?): return "\(type) · \(slug)"
+        case let (type?, nil): return type
+        case let (nil, slug?): return slug
+        case (nil, nil): return String(id.prefix(8))
+        }
+    }
+
+    /// Stable transcript loader key (distinct from parent's sessionId).
+    var transcriptKey: String { "subagent:\(id)" }
+
+    static func == (lhs: Subagent, rhs: Subagent) -> Bool {
+        lhs.id == rhs.id
+            && lhs.status == rhs.status
+            && lhs.subagents == rhs.subagents
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+    }
+}
+
+extension Subagent {
+    /// Returns all subagents in the subtree rooted at this node, including self.
+    var flattenedSelfAndDescendants: [Subagent] {
+        [self] + subagents.flatMap { $0.flattenedSelfAndDescendants }
+    }
+
+    /// Depth-first search for a subagent with the given id within this subtree.
+    func findDescendant(id: String) -> Subagent? {
+        if self.id == id { return self }
+        for child in subagents {
+            if let found = child.findDescendant(id: id) { return found }
+        }
+        return nil
+    }
+}
+
+/// Identifies the active selection in the sidebar. Used as a SwiftUI `List`
+/// selection value and resolved to a concrete session or subagent via
+/// `Array<ClaudeSession>.find(_:)` below.
+enum SidebarSelection: Hashable {
+    case session(sessionId: String)
+    case subagent(agentId: String)
+}
+
+/// Resolved selection target: a session, or a subagent with its parent.
+enum SidebarSelectionTarget {
+    case session(ClaudeSession)
+    case subagent(parent: ClaudeSession, subagent: Subagent)
+}
+
+extension Array where Element == ClaudeSession {
+    /// Resolves a `SidebarSelection` into a concrete session or subagent within this
+    /// array. Returns nil if the referenced item no longer exists (e.g. subagent
+    /// finished and parent was rewritten).
+    func find(_ selection: SidebarSelection) -> SidebarSelectionTarget? {
+        switch selection {
+        case .session(let id):
+            return first(where: { $0.id == id }).map(SidebarSelectionTarget.session)
+        case .subagent(let agentId):
+            for session in self {
+                for sub in session.subagents {
+                    if let found = sub.findDescendant(id: agentId) {
+                        return .subagent(parent: session, subagent: found)
+                    }
+                }
+            }
+            return nil
+        }
+    }
+}
+
 /// A single Claude CLI session detected from on-disk data and process inspection.
 struct ClaudeSession: Identifiable {
     /// The session UUID from the JSONL conversation log.
@@ -187,7 +301,13 @@ struct ClaudeSession: Identifiable {
         abbreviatePath(projectPath)
     }
 
-    /// Current state of the session.
+    /// Status read directly from this session's JSONL tail.
+    var ownStatus: SessionStatus
+
+    /// Effective status used for sidebar grouping/sorting. Computed as the
+    /// highest-priority status among (ownStatus, all descendant subagents),
+    /// so that a session whose deepest subagent needs input bubbles up to
+    /// the "Needs Input" section. Defaults to `ownStatus` until rollup runs.
     var status: SessionStatus
 
     /// Task progress summary, if tasks/todos exist.
@@ -208,6 +328,12 @@ struct ClaudeSession: Identifiable {
     /// Modification time of the JSONL file.
     var lastModified: Date
 
+    /// Subagents spawned from this session, in launch order.
+    var subagents: [Subagent] = []
+
+    /// Stable transcript loader key.
+    var transcriptKey: String { "session:\(id)" }
+
     // MARK: - Sorting
 
     /// Sort key: by status priority, then by waiting duration (longest first).
@@ -225,9 +351,11 @@ extension ClaudeSession: Comparable {
     static func == (lhs: ClaudeSession, rhs: ClaudeSession) -> Bool {
         lhs.id == rhs.id
             && lhs.status == rhs.status
+            && lhs.ownStatus == rhs.ownStatus
             && lhs.taskSummary == rhs.taskSummary
             && lhs.gitBranch == rhs.gitBranch
             && lhs.gitStatus == rhs.gitStatus
+            && lhs.subagents == rhs.subagents
     }
 }
 

@@ -43,6 +43,19 @@ final class ScreenshotTests: XCTestCase {
         takeScreenshot(named: "04-interrupted")
     }
 
+    func testScreenshot_05_SubagentDetail() throws {
+        // Pick any subagent row and click it; verify the detail pane swaps to
+        // the SubagentDetailView (identifier `subagent-detail`).
+        let allElements = app.descendants(matching: .any)
+        let subagentRow = allElements.matching(NSPredicate(format: "identifier BEGINSWITH 'subagent-row-'")).firstMatch
+        XCTAssertTrue(subagentRow.waitForExistence(timeout: 5), "No subagent row found in sidebar")
+        subagentRow.click()
+        sleep(1)
+        let detail = app.descendants(matching: .any).matching(identifier: "subagent-detail").firstMatch
+        XCTAssertTrue(detail.exists, "Subagent detail view did not appear after selecting a subagent row")
+        takeScreenshot(named: "05-subagent-detail")
+    }
+
     // MARK: - Helpers
 
     /// Collects all section headers and session rows in document order,

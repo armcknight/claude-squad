@@ -31,6 +31,10 @@ final class ClaudeSessionDetector {
     /// If the file hasn't changed since last check, reuse the cached session.
     private var sessionCache: [String: (modDate: Date, session: ClaudeSession)] = [:]
 
+    /// Cache: subagent JSONL file path → (effective subtree mod date, last analyzed Subagent).
+    /// Effective mod date includes nested subagents, so any descendant write invalidates.
+    private var subagentCache: [String: (modDate: Date, subagent: Subagent)] = [:]
+
     struct FirstLineInfo {
         let cwd: String
         let sessionId: String
@@ -95,8 +99,16 @@ final class ClaudeSessionDetector {
 
         // Step 3: Clean caches of stale entries.
         let currentPaths = Set(projectJSONLFiles)
-        firstLineCache = firstLineCache.filter { currentPaths.contains($0.key) }
+        var activeSubagentPaths = Set<String>()
+        for session in sessions {
+            for sub in session.subagents.flatMap({ $0.flattenedSelfAndDescendants }) {
+                activeSubagentPaths.insert(sub.jsonlPath)
+            }
+        }
+        let allActivePaths = currentPaths.union(activeSubagentPaths)
+        firstLineCache = firstLineCache.filter { allActivePaths.contains($0.key) }
         sessionCache = sessionCache.filter { currentPaths.contains($0.key) }
+        subagentCache = subagentCache.filter { activeSubagentPaths.contains($0.key) }
 
         logger?.info("detectSessions() END — \(sessions.count) session(s): \(sessions.map { "\($0.displayName) [\($0.status)]" })")
         return sessions
@@ -180,19 +192,27 @@ final class ClaudeSessionDetector {
         let sessionId = meta.sessionId
         logger?.debug("Analyzing session \(sessionId): cwd=\(cwd)")
 
-        // Read tail lines to determine status. If the main JSONL's last assistant
-        // message is an unresolved Agent/Task tool_use, the real work is happening
-        // in a subagent JSONL — walk into it (recursively) and derive status there.
-        let (statusPath, statusModDate) = resolveStatusSource(jsonlPath: jsonlPath, fallbackModDate: lastModified)
-        let tailLines = readTailLines(filePath: statusPath, lineCount: tailLineCount)
-        logger?.debug("  Read \(tailLines.count) tail lines from \((statusPath as NSString).lastPathComponent)")
-        let status = determineStatus(tailLines: tailLines, lastModified: statusModDate)
-        logger?.debug("  Status: \(status)")
-        let effectiveLastModified = max(lastModified, statusModDate)
+        // Parent's own status from its own JSONL tail. Subagents are detected
+        // separately below and folded into the effective status via rollup.
+        let tailLines = readTailLines(filePath: jsonlPath, lineCount: tailLineCount)
+        logger?.debug("  Read \(tailLines.count) tail lines from \(fileName)")
+        let ownStatus = determineStatus(tailLines: tailLines, lastModified: lastModified)
+        logger?.debug("  Own status: \(ownStatus)")
+
+        // Recursively detect subagents under <jsonlPath_without_ext>/subagents/.
+        let subagentDirBase = (jsonlPath as NSString).deletingPathExtension
+        let subagents = buildSubagents(parentJSONLPathWithoutExt: subagentDirBase)
+        if !subagents.isEmpty {
+            logger?.debug("  \(subagents.count) subagent(s) under \(fileName)")
+        }
+
+        // Effective status = highest-priority among self + all descendants.
+        let status = rollUpStatus(ownStatus: ownStatus, subagents: subagents)
+        let effectiveLastModified = max(lastModified, effectiveModDate(jsonlPath: jsonlPath) ?? lastModified)
 
         // Prefer git branch from JSONL metadata, fall back to .git/HEAD.
         let gitBranch = meta.gitBranch ?? GitHelper.readBranch(projectPath: cwd)
-        
+
         // Read git status (working directory clean/dirty, ahead/behind counts).
         let gitStatus = GitHelper.readStatus(projectPath: cwd)
 
@@ -214,6 +234,7 @@ final class ClaudeSessionDetector {
             gitBranch: gitBranch,
             gitStatus: gitStatus,
             slug: meta.slug,
+            ownStatus: ownStatus,
             status: status,
             taskSummary: taskSummary,
             lastModified: effectiveLastModified
@@ -221,91 +242,156 @@ final class ClaudeSessionDetector {
         session.taskItems = taskItems
         session.pullRequestURL = prURL
         session.jsonlPath = jsonlPath
-        logger?.debug("  -> \(session.displayName) [\(status)]")
+        session.subagents = subagents
+        logger?.debug("  -> \(session.displayName) own=[\(ownStatus)] effective=[\(status)] subagents=\(subagents.count)")
         return session
     }
 
-    // MARK: - Subagent resolution
+    // MARK: - Subagent detection
 
-    /// Walks the subagent chain starting from `jsonlPath`. If the file's last assistant
-    /// block is an unresolved Agent/Task tool_use, descends into the freshest subagent
-    /// JSONL under `<jsonlPath_without_ext>/subagents/` and repeats. Returns the
-    /// JSONL path whose tail should drive status, plus its modification date.
-    func resolveStatusSource(jsonlPath: String, fallbackModDate: Date) -> (path: String, modDate: Date) {
-        var currentPath = jsonlPath
-        var currentMod = fallbackModDate
-        // Guard against pathological chains.
-        for _ in 0..<8 {
-            let tail = readTailLines(filePath: currentPath, lineCount: tailLineCount)
-            guard isWaitingOnSubagent(tailLines: tail),
-                  let (subPath, subMod) = freshestSubagentJSONL(parentJSONLPath: currentPath) else {
-                return (currentPath, currentMod)
-            }
-            logger?.debug("  delegating to subagent: \((subPath as NSString).lastPathComponent)")
-            currentPath = subPath
-            currentMod = subMod
-        }
-        return (currentPath, currentMod)
-    }
-
-    /// Returns true if the most recent assistant message in the tail is an Agent/Task
-    /// tool_use with no following user tool_result.
-    func isWaitingOnSubagent(tailLines: [String]) -> Bool {
-        if checkForToolResultAfterLastAssistant(tailLines: tailLines) { return false }
-
-        for line in tailLines.reversed() {
-            guard let data = line.data(using: .utf8),
-                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                continue
-            }
-            let type = json["type"] as? String
-            let messageRole = (json["message"] as? [String: Any])?["role"] as? String
-
-            if type == "assistant" || messageRole == "assistant" {
-                let content: [[String: Any]]
-                if let message = json["message"] as? [String: Any],
-                   let c = message["content"] as? [[String: Any]] {
-                    content = c
-                } else if let c = json["content"] as? [[String: Any]] {
-                    content = c
-                } else {
-                    return false
-                }
-                guard let lastBlock = content.last,
-                      (lastBlock["type"] as? String) == "tool_use",
-                      let toolName = lastBlock["name"] as? String else {
-                    return false
-                }
-                return toolName == "Agent" || toolName == "Task"
-            }
-            if type == "user" || messageRole == "user" {
-                return false
-            }
-        }
-        return false
-    }
-
-    /// Returns the freshest `agent-*.jsonl` under `<parentJSONLPath_without_ext>/subagents/`.
-    func freshestSubagentJSONL(parentJSONLPath: String) -> (path: String, modDate: Date)? {
-        let subagentDir = (parentJSONLPath as NSString).deletingPathExtension + "/subagents"
+    /// Recursively enumerates `agent-*.jsonl` files under `<parentJSONLPath_without_ext>/subagents/`
+    /// and builds `Subagent` values for each. Each subagent may itself have nested subagents
+    /// under `<sub_without_ext>/subagents/`.
+    func buildSubagents(parentJSONLPathWithoutExt: String) -> [Subagent] {
+        let dir = parentJSONLPathWithoutExt + "/subagents"
         let fm = FileManager.default
-        guard let files = try? fm.contentsOfDirectory(atPath: subagentDir) else { return nil }
+        guard let files = try? fm.contentsOfDirectory(atPath: dir) else { return [] }
 
-        var bestPath: String?
-        var bestDate: Date?
+        var subs: [Subagent] = []
         for file in files where file.hasSuffix(".jsonl") {
-            let path = (subagentDir as NSString).appendingPathComponent(file)
-            guard let attrs = try? fm.attributesOfItem(atPath: path),
-                  let mod = attrs[.modificationDate] as? Date else { continue }
-            if bestDate == nil || mod > bestDate! {
-                bestPath = path
-                bestDate = mod
+            let path = (dir as NSString).appendingPathComponent(file)
+            if let sub = analyzeSubagent(jsonlPath: path) {
+                subs.append(sub)
             }
         }
-        if let bestPath, let bestDate {
-            return (bestPath, bestDate)
+        // Display in launch order (oldest first).
+        return subs.sorted(by: { $0.lastModified < $1.lastModified })
+    }
+
+    /// Analyzes a single subagent JSONL. Pulls type/description from the `.meta.json`
+    /// sidecar, slug from the JSONL's first user/assistant line, launch prompt from
+    /// the first user message, status from the tail. Recurses into nested subagents.
+    func analyzeSubagent(jsonlPath: String) -> Subagent? {
+        let fm = FileManager.default
+        let fileName = (jsonlPath as NSString).lastPathComponent
+
+        // Parse agentId from `agent-<id>.jsonl`.
+        guard fileName.hasPrefix("agent-"), fileName.hasSuffix(".jsonl") else { return nil }
+        let agentId = String(fileName.dropFirst("agent-".count).dropLast(".jsonl".count))
+
+        guard let attrs = try? fm.attributesOfItem(atPath: jsonlPath),
+              let lastModified = attrs[.modificationDate] as? Date else {
+            logger?.debug("Cannot read attributes for \(fileName)")
+            return nil
+        }
+
+        // Cache by effective subtree mod date so descendant writes invalidate.
+        let effectiveMod = effectiveModDate(jsonlPath: jsonlPath) ?? lastModified
+        if let cached = subagentCache[jsonlPath], cached.modDate == effectiveMod {
+            // Re-evaluate if running, to handle staleness transitions; otherwise reuse.
+            if case .running = cached.subagent.status {
+                logger?.debug("Re-evaluating running subagent: \(agentId)")
+            } else {
+                return cached.subagent
+            }
+        }
+
+        // Slug from JSONL header line.
+        let slug = readFirstLineInfo(jsonlPath: jsonlPath)?.slug
+
+        // agentType + description from sidecar meta.json.
+        let metaJSONPath = (jsonlPath as NSString).deletingPathExtension + ".meta.json"
+        var subagentType: String?
+        var taskDescription: String?
+        if let data = fm.contents(atPath: metaJSONPath),
+           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            subagentType = json["agentType"] as? String
+            taskDescription = json["description"] as? String
+        }
+
+        // Launch prompt = first user message's content.
+        let launchPrompt = readLaunchPrompt(jsonlPath: jsonlPath)
+
+        // Status from tail.
+        let tailLines = readTailLines(filePath: jsonlPath, lineCount: tailLineCount)
+        let status = determineStatus(tailLines: tailLines, lastModified: lastModified)
+
+        // Recurse into nested subagents.
+        let nestedBase = (jsonlPath as NSString).deletingPathExtension
+        let nested = buildSubagents(parentJSONLPathWithoutExt: nestedBase)
+
+        let sub = Subagent(
+            id: agentId,
+            slug: slug,
+            subagentType: subagentType,
+            taskDescription: taskDescription,
+            launchPrompt: launchPrompt,
+            status: status,
+            transcript: [],
+            jsonlPath: jsonlPath,
+            lastModified: lastModified,
+            subagents: nested
+        )
+        subagentCache[jsonlPath] = (modDate: effectiveMod, subagent: sub)
+        return sub
+    }
+
+    /// Reads the first `user`-typed line's `message.content` from a subagent JSONL and
+    /// returns it as plain text. The first user line in a subagent JSONL is the launch
+    /// prompt passed by the parent.
+    func readLaunchPrompt(jsonlPath: String) -> String? {
+        guard let handle = FileHandle(forReadingAtPath: jsonlPath) else { return nil }
+        defer { handle.closeFile() }
+
+        var accumulated = ""
+        var linesScanned = 0
+        let maxChunks = 10
+        for _ in 0..<maxChunks {
+            let data = handle.readData(ofLength: chunkSize)
+            let atEOF = data.isEmpty
+            if !data.isEmpty, let str = String(data: data, encoding: .utf8) {
+                accumulated += str
+            }
+            let lines = accumulated.components(separatedBy: "\n")
+            let completeLines = atEOF ? lines : Array(lines.dropLast())
+            for line in completeLines {
+                if linesScanned >= headScanLineCount { return nil }
+                linesScanned += 1
+                let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+                if trimmed.isEmpty { continue }
+                guard let lineData = trimmed.data(using: .utf8),
+                      let json = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any] else {
+                    continue
+                }
+                let type = json["type"] as? String
+                let role = (json["message"] as? [String: Any])?["role"] as? String
+                guard type == "user" || role == "user" else { continue }
+                guard let message = json["message"] as? [String: Any] else { continue }
+                if let str = message["content"] as? String {
+                    return str
+                }
+                if let arr = message["content"] as? [[String: Any]] {
+                    let parts = arr.compactMap { block -> String? in
+                        guard (block["type"] as? String) == "text" else { return nil }
+                        return block["text"] as? String
+                    }
+                    if !parts.isEmpty { return parts.joined(separator: "\n\n") }
+                }
+            }
+            if atEOF { break }
+            accumulated = lines.last ?? ""
         }
         return nil
+    }
+
+    /// Rolls up the parent's effective status as the highest-priority status across
+    /// itself and all descendant subagents. Highest priority (lowest `sortPriority`)
+    /// wins. The "since" timestamps from the parent's own waiting statuses are kept
+    /// when the parent itself is the winner; otherwise the descendant's timestamp wins.
+    func rollUpStatus(ownStatus: SessionStatus, subagents: [Subagent]) -> SessionStatus {
+        let descendants = subagents.flatMap { $0.flattenedSelfAndDescendants }.map(\.status)
+        let all = [ownStatus] + descendants
+        return all.min(by: { $0.sortPriority < $1.sortPriority }) ?? ownStatus
     }
 
     /// Returns the max modification date across the main JSONL and any subagent JSONLs
@@ -602,6 +688,14 @@ final class ClaudeSessionDetector {
                 let question = extractQuestion(from: lastBlock)
                 logger?.debug("    -> waitingForQuestion (tool=\(toolName), question=\(question ?? "nil"))")
                 return .waitingForQuestion(since: lastModified, question: question)
+            }
+            // Agent/Task delegate work to a subagent — the parent JSONL won't update
+            // until the subagent returns, so absence of a tool_result here means the
+            // subagent is still running, not that the user must approve. The subagent's
+            // own status is detected separately and folded in via rollup.
+            if toolName == "Agent" || toolName == "Task" {
+                logger?.debug("    -> running (delegating to \(toolName) subagent)")
+                return .running
             }
             // If no tool_result follows this assistant tool_use AND the file is
             // stale (>3s), the tool is pending user approval — treat as needs input.

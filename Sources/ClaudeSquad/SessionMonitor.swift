@@ -54,6 +54,10 @@ final class SessionMonitor: ObservableObject {
         detector.basePath = mockBase
 
         let runningSessionIds = ["dddd4444", "eeee5555"]
+        // Subagent agentIds (substring of `agent-<agentId>.jsonl`) whose JSONLs
+        // should be touched each cycle so they render as running instead of
+        // sliding into "interrupted" via staleness.
+        let runningSubagentIds = ["aaa111aaa111aaa11", "ccc333ccc333ccc33"]
         let projectsDir = (mockBase as NSString).appendingPathComponent("projects")
         if let dirs = try? FileManager.default.contentsOfDirectory(atPath: projectsDir) {
             for dir in dirs {
@@ -67,6 +71,9 @@ final class SessionMonitor: ObservableObject {
                     }
                 }
             }
+            // Walk subagent directories recursively, touching any `agent-<id>.jsonl`
+            // whose id matches a running subagent.
+            collectRunningSubagentPaths(in: projectsDir, ids: runningSubagentIds, into: &detector.runningFixturePaths)
         }
         let monitor = SessionMonitor(detector: detector, refreshInterval: 3)
         monitor.logger = logger
@@ -74,6 +81,26 @@ final class SessionMonitor: ObservableObject {
             monitor.transcriptLoader.logger = logger
         }
         return monitor
+    }
+    #endif
+
+    #if DEBUG
+    /// Recursively walks `dir`, collecting paths of any `agent-<id>.jsonl` whose
+    /// filename matches one of `ids`. Used by mock mode so running subagents stay
+    /// fresh and don't slide into "interrupted" via staleness.
+    private static func collectRunningSubagentPaths(in dir: String, ids: [String], into paths: inout [String]) {
+        let fm = FileManager.default
+        guard let entries = try? fm.contentsOfDirectory(atPath: dir) else { return }
+        for entry in entries {
+            let path = (dir as NSString).appendingPathComponent(entry)
+            var isDir: ObjCBool = false
+            if fm.fileExists(atPath: path, isDirectory: &isDir), isDir.boolValue {
+                collectRunningSubagentPaths(in: path, ids: ids, into: &paths)
+            } else if entry.hasPrefix("agent-"), entry.hasSuffix(".jsonl"),
+                      ids.contains(where: { entry.contains($0) }) {
+                paths.append(path)
+            }
+        }
     }
     #endif
 
