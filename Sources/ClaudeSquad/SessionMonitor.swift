@@ -47,7 +47,7 @@ final class SessionMonitor: ObservableObject {
         detector.logger = logger
         guard let mockBase = Bundle.main.path(forResource: "MockData", ofType: nil, inDirectory: "Fixtures") else {
             logger.warning("MockData not found in bundle")
-            let monitor = SessionMonitor(detector: detector, refreshInterval: 3)
+            let monitor = SessionMonitor(detector: detector, refreshInterval: AppSettings.defaultPollFrequency)
             monitor.logger = logger
             return monitor
         }
@@ -75,7 +75,7 @@ final class SessionMonitor: ObservableObject {
             // whose id matches a running subagent.
             collectRunningSubagentPaths(in: projectsDir, ids: runningSubagentIds, into: &detector.runningFixturePaths)
         }
-        let monitor = SessionMonitor(detector: detector, refreshInterval: 3)
+        let monitor = SessionMonitor(detector: detector, refreshInterval: AppSettings.defaultPollFrequency)
         monitor.logger = logger
         DispatchQueue.main.async {
             monitor.transcriptLoader.logger = logger
