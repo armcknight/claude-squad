@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct SettingsView: View {
+    @ObservedObject var monitor: SessionMonitor
     let loginItemManager: LoginItemManagerProtocol
     let globalHotkey: GlobalHotkey
     weak var logger: Logger?
@@ -8,6 +9,9 @@ struct SettingsView: View {
     @State private var launchAtLogin: Bool = false
     @State private var hotkeyCombo: GlobalHotkey.KeyCombo = .default
     @State private var selectedTab: SettingsTab = .general
+    @State private var pollFrequency: TimeInterval = AppSettings.pollFrequency
+
+    private let pollFrequencyOptions: [TimeInterval] = [1, 3, 5, 10, 30, 60]
 
     enum SettingsTab: String, CaseIterable {
         case general = "General"
@@ -33,10 +37,11 @@ struct SettingsView: View {
 
             Spacer()
         }
-        .frame(width: 400, height: 250)
+        .frame(width: 400, height: 280)
         .onAppear {
             launchAtLogin = loginItemManager.isEnabled
             hotkeyCombo = globalHotkey.currentCombo
+            pollFrequency = AppSettings.pollFrequency
         }
     }
 
@@ -58,8 +63,24 @@ struct SettingsView: View {
                     globalHotkey.updateCombo(newCombo)
                 }
             }
+
+            Picker("Poll Interval", selection: $pollFrequency) {
+                ForEach(pollFrequencyOptions, id: \.self) { value in
+                    Text(pollFrequencyLabel(value)).tag(value)
+                }
+            }
+            .onChange(of: pollFrequency) { _, newValue in
+                AppSettings.pollFrequency = newValue
+                monitor.updateRefreshInterval(newValue)
+            }
         }
         .formStyle(.grouped)
+    }
+
+    private func pollFrequencyLabel(_ interval: TimeInterval) -> String {
+        if interval == 60 { return "1 minute" }
+        let seconds = Int(interval)
+        return "\(seconds) second\(seconds == 1 ? "" : "s")"
     }
 
     private var aboutTab: some View {

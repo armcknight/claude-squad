@@ -35,6 +35,9 @@ enum AnalyticsEvent: String {
     case changelogShownOnUpgrade = "changelog_shown_on_upgrade"
     case changelogOpened = "changelog_opened"
 
+    // Settings
+    case pollIntervalChanged = "poll_interval_changed"
+
     // Actions
     case copyPath = "copy_path"
     case copyBranch = "copy_branch"

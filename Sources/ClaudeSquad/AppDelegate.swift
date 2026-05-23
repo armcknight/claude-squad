@@ -54,7 +54,7 @@ import UserNotifications
         detector.logger = logger
         self.detector = detector
 
-        let monitor = SessionMonitor(detector: detector, refreshInterval: 3)
+        let monitor = SessionMonitor(detector: detector, refreshInterval: AppSettings.pollFrequency)
         monitor.logger = logger
         monitor.analytics = analyticsProvider
         self.monitor = monitor
@@ -190,9 +190,9 @@ import UserNotifications
             settingsWindow.makeKeyAndOrderFront(nil)
             return
         }
-        let settingsView = SettingsView(loginItemManager: loginItemManager, globalHotkey: globalHotkey, logger: logger)
+        let settingsView = SettingsView(monitor: monitor, loginItemManager: loginItemManager, globalHotkey: globalHotkey, logger: logger)
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 400, height: 200),
+            contentRect: NSRect(x: 0, y: 0, width: 400, height: 280),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false

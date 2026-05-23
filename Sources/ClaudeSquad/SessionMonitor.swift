@@ -14,7 +14,7 @@ final class SessionMonitor: ObservableObject {
     let transcriptLoader: TranscriptLoader
 
     private let detector: ClaudeSessionDetector
-    private let refreshInterval: TimeInterval
+    private var refreshInterval: TimeInterval
     private var timer: Timer?
     weak var logger: Logger?
     weak var analytics: AnalyticsProvider?
@@ -118,6 +118,14 @@ final class SessionMonitor: ObservableObject {
         logger?.info("SessionMonitor stopping")
         timer?.invalidate()
         timer = nil
+    }
+
+    func updateRefreshInterval(_ interval: TimeInterval) {
+        logger?.info("SessionMonitor updating interval to \(interval)s")
+        analytics?.track(event: AnalyticsEvent.pollIntervalChanged.rawValue, properties: ["interval": interval])
+        stop()
+        refreshInterval = interval
+        start()
     }
 
     // MARK: - Refresh
