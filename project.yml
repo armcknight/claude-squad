@@ -43,6 +43,7 @@ fileGroups:
   - .github
   - .env
   - CHANGELOG.md
+  - scripts/
 
 targets:
   ClaudeSquad:

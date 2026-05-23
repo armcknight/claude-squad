@@ -5,6 +5,7 @@ struct SessionDetailView: View {
     let session: ClaudeSession
     let monitor: SessionMonitor
     @ObservedObject var transcriptLoader: TranscriptLoader
+    @State private var isTasksExpanded: Bool = true
 
     var body: some View {
         ScrollView {
@@ -107,18 +108,32 @@ struct SessionDetailView: View {
                 } else if let tasks = session.taskSummary {
                     Divider()
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Tasks")
-                            .font(.headline)
-                        ProgressView(value: Double(tasks.completed), total: Double(tasks.total))
                         HStack {
-                            Text("\(tasks.completed)/\(tasks.total) completed")
-                            if tasks.inProgress > 0 {
-                                Text("(\(tasks.inProgress) in progress)")
+                            Text("Tasks")
+                                .font(.headline)
+                            Spacer()
+                            Button {
+                                isTasksExpanded.toggle()
+                            } label: {
+                                Image(systemName: isTasksExpanded ? "chevron.down" : "chevron.right")
+                                    .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
+                            .buttonStyle(.plain)
                         }
-                        .font(.caption)
+                        if isTasksExpanded {
+                            ProgressView(value: Double(tasks.completed), total: Double(tasks.total))
+                            HStack {
+                                Text("\(tasks.completed)/\(tasks.total) completed")
+                                if tasks.inProgress > 0 {
+                                    Text("(\(tasks.inProgress) in progress)")
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            .font(.caption)
+                        }
                     }
+                    .animation(.default, value: isTasksExpanded)
                 }
 
                 // Transcript
@@ -162,34 +177,56 @@ struct SessionDetailView: View {
                     Text("\(summary.completed)/\(summary.total) completed")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                    Button {
+                        isTasksExpanded.toggle()
+                    } label: {
+                        Image(systemName: isTasksExpanded ? "chevron.down" : "chevron.right")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
                 }
                 ProgressView(value: Double(summary.completed), total: Double(summary.total))
             } else {
-                Text("Tasks")
-                    .font(.headline)
+                HStack {
+                    Text("Tasks")
+                        .font(.headline)
+                    Spacer()
+                    Button {
+                        isTasksExpanded.toggle()
+                    } label: {
+                        Image(systemName: isTasksExpanded ? "chevron.down" : "chevron.right")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
             }
 
-            ForEach(session.taskItems) { task in
-                HStack(alignment: .top, spacing: 8) {
-                    Image(systemName: taskIcon(for: task.status))
-                        .foregroundStyle(taskColor(for: task.status))
-                        .frame(width: 16)
+            if isTasksExpanded {
+                ForEach(session.taskItems) { task in
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: taskIcon(for: task.status))
+                            .foregroundStyle(taskColor(for: task.status))
+                            .frame(width: 16)
 
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(task.subject)
-                            .fontWeight(.medium)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(task.subject)
+                                .fontWeight(.medium)
 
-                        if let description = task.description, !description.isEmpty {
-                            Text(description)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(3)
+                            if let description = task.description, !description.isEmpty {
+                                Text(description)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(3)
+                            }
                         }
                     }
+                    .padding(.vertical, 2)
                 }
-                .padding(.vertical, 2)
             }
         }
+        .animation(.default, value: isTasksExpanded)
     }
 
     private func taskIcon(for status: String) -> String {
