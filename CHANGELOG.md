@@ -10,6 +10,7 @@
 ### Fixed
 - Session status now reflects activity inside running subagents. Previously, sessions invoking a long `Agent`/`Task` call would appear stuck in "Needs Input" because the detector only watched the top-level JSONL, and approval prompts raised by the subagent itself were invisible.
 - Open session detail views now refresh their transcript as Claude writes new entries to the JSONL, instead of staying frozen on the snapshot loaded when the view first appeared.
+- Transcript view now shows the full plan when an assistant turn ends with `ExitPlanMode`, both while the plan is pending approval and after it exits. Previously the bubble only displayed the bare tool name, and the "Question" section on the detail view was empty for plan-mode prompts.
 
 ## [1.0.0] - 2026-03-06
 

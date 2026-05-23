@@ -236,6 +236,30 @@ final class ClaudeSessionDetectorTests: XCTestCase {
         XCTAssertEqual(question, "Continue?")
     }
 
+    func test_extractQuestionFallsBackToPlanForExitPlanMode() {
+        let block: [String: Any] = [
+            "type": "tool_use",
+            "name": "ExitPlanMode",
+            "input": ["plan": "# Refactor\n\n1. Step one\n2. Step two\n"]
+        ]
+        let question = detector.extractQuestion(from: block)
+        XCTAssertEqual(question, "# Refactor\n\n1. Step one\n2. Step two")
+    }
+
+    // MARK: - Tool call summary
+
+    func test_toolCallSummaryExtractsExitPlanModeContent() {
+        let plan = "# Plan\n\n1. Do thing A\n2. Do thing B\n"
+        let summary = detector.toolCallSummary(name: "ExitPlanMode", input: ["plan": plan])
+        XCTAssertEqual(summary, "# Plan\n\n1. Do thing A\n2. Do thing B")
+    }
+
+    func test_toolCallSummaryReturnsNilForExitPlanModeWithoutPlan() {
+        XCTAssertNil(detector.toolCallSummary(name: "ExitPlanMode", input: [:]))
+        XCTAssertNil(detector.toolCallSummary(name: "ExitPlanMode", input: ["plan": "   \n  "]))
+        XCTAssertNil(detector.toolCallSummary(name: "ExitPlanMode", input: nil))
+    }
+
     // MARK: - Task summary reading
 
     func test_readTaskSummaryFromTodosDir() throws {

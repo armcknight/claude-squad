@@ -319,6 +319,22 @@ struct SessionDetailView: View {
                 ForEach(Array(message.toolCalls.enumerated()), id: \.offset) { _, call in
                     if !call.askQuestions.isEmpty {
                         askQuestionView(call.askQuestions)
+                    } else if call.name == "ExitPlanMode" {
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack(spacing: 4) {
+                                Image(systemName: "list.bullet.clipboard")
+                                    .font(.caption2)
+                                Text("Plan")
+                                    .font(.caption.weight(.medium))
+                            }
+                            .foregroundStyle(.secondary)
+                            if let summary = call.summary {
+                                Text(summary)
+                                    .textSelection(.enabled)
+                                    .font(.callout)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                        }
                     } else {
                         HStack(spacing: 4) {
                             Image(systemName: "wrench.and.screwdriver")

@@ -813,7 +813,8 @@ final class ClaudeSessionDetector {
         return .running
     }
 
-    /// Extracts the question text from an AskUserQuestion tool_use block.
+    /// Extracts the prompt text shown to the user from a tool_use block —
+    /// either an AskUserQuestion's question, or an ExitPlanMode's plan body.
     func extractQuestion(from toolUseBlock: [String: Any]) -> String? {
         guard let input = toolUseBlock["input"] as? [String: Any] else { return nil }
         if let questions = input["questions"] as? [[String: Any]],
@@ -823,6 +824,10 @@ final class ClaudeSessionDetector {
         }
         if let question = input["question"] as? String {
             return question
+        }
+        if let plan = input["plan"] as? String {
+            let trimmed = plan.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty { return trimmed }
         }
         return nil
     }
@@ -1128,7 +1133,7 @@ final class ClaudeSessionDetector {
         )
     }
 
-    private func toolCallSummary(name: String, input: [String: Any]?) -> String? {
+    func toolCallSummary(name: String, input: [String: Any]?) -> String? {
         guard let input else { return nil }
         switch name {
         case "Bash":
@@ -1151,6 +1156,10 @@ final class ClaudeSessionDetector {
                 return first["question"] as? String
             }
             return nil
+        case "ExitPlanMode":
+            guard let plan = input["plan"] as? String else { return nil }
+            let trimmed = plan.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
         default:
             return nil
         }
