@@ -151,6 +151,7 @@ struct SessionDetailView: View {
             }
         }
         .onChange(of: session.id) { _, _ in
+            isTasksExpanded = true
             if let jsonlPath = session.jsonlPath {
                 transcriptLoader.loadIfNeeded(transcriptKey: session.transcriptKey, jsonlPath: jsonlPath)
             }
@@ -186,7 +187,9 @@ struct SessionDetailView: View {
                     }
                     .buttonStyle(.plain)
                 }
-                ProgressView(value: Double(summary.completed), total: Double(summary.total))
+                if isTasksExpanded {
+                    ProgressView(value: Double(summary.completed), total: Double(summary.total))
+                }
             } else {
                 HStack {
                     Text("Tasks")
