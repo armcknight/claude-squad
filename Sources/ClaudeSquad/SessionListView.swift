@@ -103,8 +103,10 @@ struct SessionListView: View {
                     subagentRows(for: session.subagents, indentLevel: 1)
                 }
             )
-        } else if node.sessions.isEmpty && node.children.count == 1 {
-            // Pass-through: single child, no sessions — skip rendering this node
+        } else if node.sessions.isEmpty && node.children.count == 1 && !node.children[0].children.isEmpty {
+            // Pass-through: single child *directory* with no sessions — skip this
+            // intermediate node. Never skip when the child is a leaf session, or the
+            // folder wrapping a lone session would be invisible.
             return pathTreeView(node: node.children[0], priority: priority)
         } else {
             // Directory group header
@@ -202,105 +204,4 @@ struct SessionListView: View {
         groupedSessions.keys.sorted()
     }
 
-    // MARK: - Path tree building
-
-    /// A node in the directory tree. Either a directory grouping or a leaf session.
-    struct PathTreeNode: Identifiable {
-        let id = UUID()
-        let fullPath: String
-        let displayLabel: String
-        var sessions: [ClaudeSession]
-        var children: [PathTreeNode]
-    }
-
-    /// Mutable trie node used during tree construction.
-    private class TrieNode {
-        var children: [String: TrieNode] = [:]
-        var sessions: [ClaudeSession] = []
-    }
-
-    /// Builds a directory tree from session paths using a trie.
-    /// Sessions at /a/b/x and /a/b/c/y will produce:
-    ///   /a/b/
-    ///     x (leaf)
-    ///     c/
-    ///       y (leaf)
-    private func buildPathTree(sessions: [ClaudeSession]) -> [PathTreeNode] {
-        let root = TrieNode()
-
-        for session in sessions {
-            var components = (session.projectPath as NSString).pathComponents
-            // Replace home directory prefix with ~
-            let homeComponents = (NSHomeDirectory() as NSString).pathComponents
-            if components.starts(with: homeComponents) {
-                components = ["~"] + Array(components.dropFirst(homeComponents.count))
-            }
-            // Remove leading "/"
-            if components.first == "/" { components.removeFirst() }
-
-            // Walk the trie, creating nodes as needed. The last component
-            // is the session's project directory — attach the session there.
-            var current = root
-            for (i, component) in components.enumerated() {
-                if i == components.count - 1 {
-                    // Leaf: attach session
-                    if current.children[component] == nil {
-                        current.children[component] = TrieNode()
-                    }
-                    current.children[component]!.sessions.append(session)
-                } else {
-                    if current.children[component] == nil {
-                        current.children[component] = TrieNode()
-                    }
-                    current = current.children[component]!
-                }
-            }
-        }
-
-        // Convert trie to display nodes, collapsing single-child chains.
-        return convertTrieChildren(root, parentPath: "")
-    }
-
-    /// Converts trie children into PathTreeNode array, collapsing chains of
-    /// single-child directories with no sessions into one combined label.
-    private func convertTrieChildren(_ node: TrieNode, parentPath: String) -> [PathTreeNode] {
-        var result: [PathTreeNode] = []
-
-        for (component, child) in node.children.sorted(by: { $0.key < $1.key }) {
-            let fullPath = parentPath.isEmpty ? component : parentPath + "/" + component
-
-            // Collapse single-child chains: if this node has exactly one child
-            // and no sessions, merge it with the child's label.
-            var current = child
-            var label = component
-            var currentPath = fullPath
-            while current.sessions.isEmpty && current.children.count == 1 {
-                let (nextComponent, nextChild) = current.children.first!
-                label += "/" + nextComponent
-                currentPath += "/" + nextComponent
-                current = nextChild
-            }
-
-            if current.sessions.count == 1 && current.children.isEmpty {
-                // Pure leaf: single session, no subdirectories.
-                result.append(PathTreeNode(
-                    fullPath: currentPath,
-                    displayLabel: label,
-                    sessions: current.sessions,
-                    children: []
-                ))
-            } else {
-                // Directory node: has multiple sessions and/or subdirectories.
-                let childNodes = convertTrieChildren(current, parentPath: currentPath)
-                result.append(PathTreeNode(
-                    fullPath: currentPath,
-                    displayLabel: label,
-                    sessions: current.sessions.sorted(),
-                    children: childNodes
-                ))
-            }
-        }
-
-        return result
-    }
 }
