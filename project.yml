@@ -4,9 +4,6 @@ packages:
   SwiftyBeaver:
     url: https://github.com/SwiftyBeaver/SwiftyBeaver
     version: 2.1.1
-  AmplitudeSwift:
-    url: https://github.com/amplitude/Amplitude-Swift
-    version: 1.12.0
   ArkanaKeys:
     path: ./ArkanaKeys/ArkanaKeys
   ArkanaKeysInterfaces:
@@ -17,7 +14,7 @@ projectReferences:
     path: sentry-cocoa/Sentry.xcodeproj
 
 options:
-  bundleIdPrefix: com.armcknight
+  bundleIdPrefix: io.mcknight
   xcodeVersion: 16.0
   createIntermediateGroups: true
 
@@ -66,7 +63,6 @@ targets:
     dependencies:
       - package: SwiftyBeaver
       - target: Sentry/Sentry
-      - package: AmplitudeSwift
       - package: ArkanaKeys
       - package: ArkanaKeysInterfaces
     configFiles:

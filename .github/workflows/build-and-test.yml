@@ -25,8 +25,7 @@ jobs:
 
       - name: Generate Arkana keys
         env:
-          SentryDSN: ${{ secrets.SENTRY_DSN }}
-          AmplitudeAPIKey: ${{ secrets.AMPLITUDE_API_KEY }}
+          SentryDSN: ${{ secrets.SENTRYDSN }}
         run: bundle exec arkana
 
       - name: Generate Xcode project
@@ -60,8 +59,7 @@ jobs:
 
       - name: Generate Arkana keys
         env:
-          SentryDSN: ${{ secrets.SENTRY_DSN }}
-          AmplitudeAPIKey: ${{ secrets.AMPLITUDE_API_KEY }}
+          SentryDSN: ${{ secrets.SENTRYDSN }}
         run: bundle exec arkana
 
       - name: Generate Xcode project

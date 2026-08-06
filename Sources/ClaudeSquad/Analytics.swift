@@ -45,35 +45,6 @@ enum AnalyticsEvent: String {
     case openPR = "open_pr"
 }
 
-// MARK: - Amplitude implementation
-
-import AmplitudeSwift
-
-final class AmplitudeAnalyticsProvider: AnalyticsProvider {
-    private let apiKey: String
-    private var amplitude: Amplitude?
-
-    init(apiKey: String) {
-        self.apiKey = apiKey
-    }
-
-    func configure() {
-        amplitude = Amplitude(configuration: Configuration(apiKey: apiKey))
-    }
-
-    func track(event: String, properties: [String: Any]?) {
-        amplitude?.track(eventType: event, eventProperties: properties)
-    }
-
-    func setUser(id: String?, properties: [String: Any]?) {
-        if let id {
-            amplitude?.setUserId(userId: id)
-        } else {
-            amplitude?.setUserId(userId: nil)
-        }
-    }
-}
-
 // MARK: - No-op implementation
 
 final class NoOpAnalyticsProvider: AnalyticsProvider {
