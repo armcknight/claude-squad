@@ -36,7 +36,6 @@ fileGroups:
   - project.yml
   - .gitignore
   - .arkana.yml
-  - .claude
   - .github
   - .env
   - CHANGELOG.md

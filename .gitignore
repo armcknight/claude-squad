@@ -18,6 +18,10 @@ ArkanaKeys/
 # secrets
 .env
 
+# per-machine tool config, not shared
+.claude/settings.local.json
+.xcodebuildmcp/config.yaml
+
 # ruby
 .bundle/
 vendor/

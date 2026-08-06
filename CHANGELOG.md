@@ -3,10 +3,14 @@
 ## [Unreleased]
 
 ### Added
+- Installable with Homebrew: `brew install --cask armcknight/tools/claude-squad`. Releases are signed with a Developer ID certificate, notarized, and stapled, so the app launches without a Gatekeeper warning.
 - Poll interval is now configurable in Settings (General tab), with presets from 1 second to 1 minute. The default remains 3 seconds.
 - Task list in the session detail view is now collapsible via a chevron button, keeping the header always visible.
 - All sessions in the sidebar now appear inside expandable folder nodes showing their parent directory path, even when the session is the only one in its directory. Previously, solo sessions were shown as flat rows with the full path as their label.
 - Subagents now appear as their own indented rows beneath the session that launched them, with their own status icon, type, slug, elapsed time, and full transcript in the detail pane. Selecting a subagent shows its launch prompt (in place of the parent's project/branch, which it shares) and its own conversation. Nested subagents indent further. A parent session's effective sidebar status is rolled up from itself and all descendants using the priority order: needs input > interrupted > idle > running > inactive.
+
+### Removed
+- Amplitude analytics. The `AnalyticsProvider` protocol and its event call sites remain, but no provider is wired up, so no analytics are collected.
 
 ### Fixed
 - Open session detail views now refresh their transcript as Claude writes new entries to the JSONL, instead of staying frozen on the snapshot loaded when the view first appeared.

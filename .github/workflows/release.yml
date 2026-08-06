@@ -1,76 +1,42 @@
 name: Release
 
+# Push a version tag to cut a release:
+#
+#   git tag 1.0.0 && git push origin 1.0.0
+#
+# The shared workflow builds a Release archive, signs it with the Developer ID
+# Application identity, notarizes and staples it, attaches the zip to a
+# `claude-squad-<version>` release on the public armcknight/homebrew-tools tap,
+# and bumps `Casks/claude-squad.rb` there. Install with:
+#
+#   brew install --cask armcknight/tools/claude-squad
+#
+# Required repo secrets (see armcknight/workflows README): TAP_RELEASE_TOKEN,
+# MATCH_PASSWORD, MATCH_DEPLOY_KEY, NOTARY_KEY, NOTARY_KEY_ID, NOTARY_ISSUER_ID,
+# SENTRYDSN.
+
 on:
-  workflow_dispatch:
-    inputs:
-      version:
-        description: 'Version number (e.g. 1.0.0)'
-        required: true
-        type: string
+  push:
+    tags:
+      - '[0-9]+.[0-9]+.[0-9]+'
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+
+permissions:
+  contents: write
 
 jobs:
   release:
-    name: Build and Release
-    runs-on: macos-15
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - name: Set up Ruby
-        uses: ruby/setup-ruby@v1
-        with:
-          bundler-cache: true
-
-      - name: Install dependencies
-        run: brew bundle
-
-      - name: Generate Arkana keys
-        env:
-          SentryDSN: ${{ secrets.SENTRY_DSN }}
-          AmplitudeAPIKey: ${{ secrets.AMPLITUDE_API_KEY }}
-        run: bundle exec arkana
-
-      - name: Generate Xcode project
-        run: xcodegen
-
-      - name: Set version
-        run: |
-          sed -i '' "s/MARKETING_VERSION = .*/MARKETING_VERSION = ${{ inputs.version }}/" config/ClaudeSquad.xcconfig
-
-      - name: Build Release
-        run: |
-          set -o pipefail
-          xcodebuild -project ClaudeSquad.xcodeproj \
-            -scheme ClaudeSquad \
-            -configuration Release \
-            -destination 'platform=macOS' \
-            -archivePath build/ClaudeSquad.xcarchive \
-            archive 2>&1 | xcbeautify
-
-      - name: Export app
-        run: |
-          xcodebuild -exportArchive \
-            -archivePath build/ClaudeSquad.xcarchive \
-            -exportPath build/export \
-            -exportOptionsPlist config/ExportOptions.plist 2>&1 || true
-          # Fallback: copy from archive directly
-          if [ ! -d "build/export/ClaudeSquad.app" ]; then
-            mkdir -p build/export
-            cp -R "build/ClaudeSquad.xcarchive/Products/Applications/ClaudeSquad.app" build/export/
-          fi
-
-      - name: Create zip
-        run: |
-          cd build/export
-          ditto -c -k --keepParent ClaudeSquad.app ClaudeSquad-${{ inputs.version }}.zip
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: v${{ inputs.version }}
-          name: v${{ inputs.version }}
-          files: build/export/ClaudeSquad-${{ inputs.version }}.zip
-          generate_release_notes: true
+    uses: armcknight/workflows/.github/workflows/macos-cask-release.yml@main
+    with:
+      scheme: ClaudeSquad
+      app-name: ClaudeSquad
+      cask-name: claude-squad
+      project: ClaudeSquad.xcodeproj
+      version-xcconfig: config/ClaudeSquad.xcconfig
+      match-git-url: git@github.com:armcknight/fastlane-match.git
+      team-id: 29274SF4VL
+      # Key names only — never values. Resolves to a same-named repo secret,
+      # matched case-insensitively: SENTRYDSN, same naming as
+      # delaunay/dough/mtg/babysittr.
+      arkana-keys: SentryDSN
+    secrets: inherit
