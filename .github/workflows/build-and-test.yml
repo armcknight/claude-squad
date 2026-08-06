@@ -26,7 +26,12 @@ jobs:
       - name: Generate Arkana keys
         env:
           SentryDSN: ${{ secrets.SENTRYDSN }}
-        run: bundle exec arkana
+        run: |
+          # project.yml lists .env as a file group, so xcodegen fails spec
+          # validation when it is absent — it is gitignored, so it never exists on
+          # a runner. arkana itself reads the key from the environment above.
+          touch .env
+          bundle exec arkana
 
       - name: Generate Xcode project
         run: xcodegen
@@ -60,7 +65,12 @@ jobs:
       - name: Generate Arkana keys
         env:
           SentryDSN: ${{ secrets.SENTRYDSN }}
-        run: bundle exec arkana
+        run: |
+          # project.yml lists .env as a file group, so xcodegen fails spec
+          # validation when it is absent — it is gitignored, so it never exists on
+          # a runner. arkana itself reads the key from the environment above.
+          touch .env
+          bundle exec arkana
 
       - name: Generate Xcode project
         run: xcodegen
