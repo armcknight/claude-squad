@@ -33,7 +33,7 @@ final class Logger {
 
     private func fileDestination(minLevel: SwiftyBeaver.Level) -> FileDestination {
         let cachesDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
-        let bundleId = Bundle.main.bundleIdentifier ?? "com.armcknight.ClaudeSquad"
+        let bundleId = Bundle.main.bundleIdentifier ?? "io.mcknight.ClaudeSquad"
         let logDirectory = cachesDir.appendingPathComponent(bundleId).appendingPathComponent("Logs", isDirectory: true)
 
         try? FileManager.default.createDirectory(at: logDirectory, withIntermediateDirectories: true)

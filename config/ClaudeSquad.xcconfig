@@ -1,7 +1,7 @@
 #include? "GitInfo.xcconfig"
 
 INFOPLIST_FILE = Sources/ClaudeSquad/Info.plist
-PRODUCT_BUNDLE_IDENTIFIER = com.armcknight.ClaudeSquad
+PRODUCT_BUNDLE_IDENTIFIER = io.mcknight.ClaudeSquad
 PRODUCT_NAME = ClaudeSquad
 
 CURRENT_PROJECT_VERSION = 1
