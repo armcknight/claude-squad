@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.1.0] 2026-08-08
+
 ### Added
 - Installable with Homebrew: `brew install --cask armcknight/tools/claude-squad`. Releases are signed with a Developer ID certificate, notarized, and stapled, so the app launches without a Gatekeeper warning.
 - Poll interval is now configurable in Settings (General tab), with presets from 1 second to 1 minute. The default remains 3 seconds.
