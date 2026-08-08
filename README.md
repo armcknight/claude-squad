@@ -13,11 +13,24 @@ Needs macOS 14 Sonoma or newer. Builds are signed with a Developer ID certificat
 
 # Release
 
-Push a version tag:
+Bump the version, then deploy — same targets as the other repos that use the
+`armcknight/tools` binaries (needs `vrsn` and `prepare-release` on PATH):
+
+```
+make patch      # or minor / major — bumps MARKETING_VERSION and commits
+make deploy     # migrates the changelog's Unreleased section, tags, pushes
+```
+
+`make deploy` pushing the tag is what starts the release. To do it by hand:
 
 ```
 git tag 1.0.1 && git push origin 1.0.1
 ```
+
+`MARKETING_VERSION` in `config/ClaudeSquad.xcconfig` is the source of truth and
+must stay valid semver — `vrsn` cannot parse a two-component version like `1.0`.
+There is no `deploy-beta`: this app has no `-rc` cask, and the workflow's tag
+filter matches only `X.Y.Z`.
 
 `.github/workflows/release.yml` calls the shared `macos-cask-release.yml` workflow in [armcknight/workflows](https://github.com/armcknight/workflows), which archives, signs, notarizes, and staples the app, attaches the zip to a `claude-squad-<version>` release on the public [armcknight/homebrew-tools](https://github.com/armcknight/homebrew-tools) tap (this repo is private, so brew cannot fetch an asset from it), and bumps `Casks/claude-squad.rb`. `MARKETING_VERSION` is stamped from the tag at build time — it is not committed.
 
