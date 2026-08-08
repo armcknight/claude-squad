@@ -35,6 +35,7 @@ jobs:
       version-xcconfig: config/ClaudeSquad.xcconfig
       match-git-url: git@github.com:armcknight/fastlane-match.git
       team-id: 29274SF4VL
+      app-identifier: io.mcknight.ClaudeSquad
       # Key names only — never values. Resolves to a same-named repo secret,
       # matched case-insensitively: SENTRYDSN, same naming as
       # delaunay/dough/mtg/babysittr.
