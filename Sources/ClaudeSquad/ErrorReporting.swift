@@ -44,6 +44,7 @@ final class SentryErrorReporter: ErrorReporter {
             #else
             options.environment = "release"
             #endif
+            options.enableAppHangTracking = false
         }
 
         let info = Bundle.main.infoDictionary
