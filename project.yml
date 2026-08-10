@@ -30,6 +30,7 @@ fileGroups:
   - config
   - Fixtures
   - README.md
+  - LICENSE
   - Makefile
   - Brewfile
   - Gemfile
