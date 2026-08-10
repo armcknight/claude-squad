@@ -55,9 +55,9 @@ filter matches only `X.Y.Z`.
 - [ ] Keyboard navigation in session list
 - [ ] Swift 6 concurrency warnings — `TranscriptLoader.swift:28` mutates a main-actor property from a nonisolated context, and `:71` captures `var self` in concurrently-executing code. Both are warnings today and errors under the Swift 6 language mode, so they block adopting it.
 - [ ] Collapse the list of subagents under a root agent, so a session that spawned many of them can be folded down to a single row
+- [x] Inject Git information into Plist and Sentry scope
+- [x] Remove the menubar component, make this just window-based
 
 # License
 
 [Apache 2.0](LICENSE).
-- [x] Inject Git information into Plist and Sentry scope
-- [x] Remove the menubar component, make this just window-based
