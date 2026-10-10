@@ -8,6 +8,9 @@
 - All sessions in the sidebar now appear inside expandable folder nodes showing their parent directory path, even when the session is the only one in its directory. Previously, solo sessions were shown as flat rows with the full path as their label.
 - Subagents now appear as their own indented rows beneath the session that launched them, with their own status icon, type, slug, elapsed time, and full transcript in the detail pane. Selecting a subagent shows its launch prompt (in place of the parent's project/branch, which it shares) and its own conversation. Nested subagents indent further. A parent session's effective sidebar status is rolled up from itself and all descendants using the priority order: needs input > interrupted > idle > running > inactive.
 
+### Changed
+- Sentry app hang tracking is now disabled. App hangs are no longer reported as Sentry events.
+
 ### Fixed
 - Open session detail views now refresh their transcript as Claude writes new entries to the JSONL, instead of staying frozen on the snapshot loaded when the view first appeared.
 - Sessions paused on a Claude permission prompt are now detected via `~/.claude/sessions/<pid>.json` and shown as "Needs Input" with a placeholder bubble in the transcript, even when the pending `tool_use` has not been written to the JSONL yet.
