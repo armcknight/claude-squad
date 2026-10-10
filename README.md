@@ -57,6 +57,7 @@ filter matches only `X.Y.Z`.
 - [ ] Collapse the list of subagents under a root agent, so a session that spawned many of them can be folded down to a single row
 - [x] Inject Git information into Plist and Sentry scope
 - [x] Remove the menubar component, make this just window-based
+- [x] Statistics window — longest session, idle gaps, peak concurrency, session frequency, token usage, and badges
 
 # License
 

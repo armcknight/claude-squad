@@ -56,6 +56,15 @@ final class ScreenshotTests: XCTestCase {
         takeScreenshot(named: "05-subagent-detail")
     }
 
+    func testScreenshot_06_Statistics() throws {
+        app.typeKey("s", modifierFlags: [.command, .shift])
+        let window = app.windows["Statistics"]
+        XCTAssertTrue(window.waitForExistence(timeout: 5), "Statistics window did not open")
+        let badge = window.descendants(matching: .any).matching(identifier: "badge-first-session").firstMatch
+        XCTAssertTrue(badge.waitForExistence(timeout: 10), "Statistics did not finish loading")
+        takeScreenshot(of: window, named: "06-statistics")
+    }
+
     // MARK: - Helpers
 
     /// Collects all section headers and session rows in document order,
@@ -87,7 +96,11 @@ final class ScreenshotTests: XCTestCase {
     }
 
     private func takeScreenshot(named name: String) {
-        let screenshot = app.windows.firstMatch.screenshot()
+        takeScreenshot(of: app.windows.firstMatch, named: name)
+    }
+
+    private func takeScreenshot(of element: XCUIElement, named name: String) {
+        let screenshot = element.screenshot()
         let attachment = XCTAttachment(screenshot: screenshot)
         attachment.name = name
         attachment.lifetime = .keepAlways

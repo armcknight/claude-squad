@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Added
+- Statistics window (Claude Squad menu → Statistics…, ⌘⇧S) built from the full session history in `~/.claude/projects/`: longest session (active time, with idle gaps over 10 minutes excluded), longest idle gap, most sessions running at the same time, new-session frequency (today, last 7 days, per active day, longest daily streak), and token usage (input, output, cache write, cache read, including subagents). Badges reward milestones such as 100 sessions, 5 concurrent sessions, a 7-day streak, and 1 million tokens, and show progress toward the badges not yet earned.
+
 ## [1.1.0] 2026-08-08
 
 ### Added
