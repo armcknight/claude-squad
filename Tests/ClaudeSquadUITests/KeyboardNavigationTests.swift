@@ -29,16 +29,20 @@ final class KeyboardNavigationTests: XCTestCase {
 
         first.click()
         XCTAssertTrue(isSelected(first), "Clicked row should be selected")
+        takeScreenshot(named: "keyboard-nav-1-first-row-selected")
 
         app.typeKey(.downArrow, modifierFlags: [])
         XCTAssertTrue(isSelected(second), "Down arrow should select the next row")
         XCTAssertFalse(isSelected(third), "Down arrow should move exactly one row")
+        takeScreenshot(named: "keyboard-nav-2-after-down-arrow")
 
         app.typeKey(.downArrow, modifierFlags: [])
         XCTAssertTrue(isSelected(third), "Down arrow should select the row after that")
+        takeScreenshot(named: "keyboard-nav-3-after-second-down-arrow")
 
         app.typeKey(.upArrow, modifierFlags: [])
         XCTAssertTrue(isSelected(second), "Up arrow should select the previous row")
+        takeScreenshot(named: "keyboard-nav-4-after-up-arrow")
     }
 
     // MARK: - Helpers
@@ -49,5 +53,12 @@ final class KeyboardNavigationTests: XCTestCase {
         let selectedCells = app.descendants(matching: .any).matching(NSPredicate(format: "isSelected == true"))
         let predicate = NSPredicate(format: "identifier == %@", identifier)
         return row.isSelected || selectedCells.descendants(matching: .any).matching(predicate).count > 0
+    }
+
+    private func takeScreenshot(named name: String) {
+        let attachment = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
     }
 }
