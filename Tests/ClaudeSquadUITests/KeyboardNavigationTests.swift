@@ -22,9 +22,13 @@ final class KeyboardNavigationTests: XCTestCase {
         XCTAssertTrue(rows.firstMatch.waitForExistence(timeout: 10), "No sidebar rows found")
 
         // One accessibility identifier can be reported on more than one element
-        // (e.g. the list cell and its content), so dedupe while keeping order.
+        // (e.g. the list cell and zero-size text inside it), so keep only visible
+        // elements, order them top to bottom, and dedupe.
         var identifiers: [String] = []
-        for identifier in rows.allElementsBoundByIndex.map(\.identifier) where !identifiers.contains(identifier) {
+        let visibleRows = rows.allElementsBoundByIndex
+            .filter { !$0.frame.isEmpty }
+            .sorted { $0.frame.minY < $1.frame.minY }
+        for identifier in visibleRows.map(\.identifier) where !identifiers.contains(identifier) {
             identifiers.append(identifier)
         }
         XCTAssertGreaterThanOrEqual(identifiers.count, 3, "Need at least three rows to test navigation")
@@ -53,8 +57,12 @@ final class KeyboardNavigationTests: XCTestCase {
             .matching(NSPredicate(format: "identifier BEGINSWITH 'session-row-' OR identifier BEGINSWITH 'subagent-row-'"))
     }
 
+    /// The largest visible element carrying `identifier`, which is the row itself.
     private func row(_ identifier: String) -> XCUIElement {
-        app.descendants(matching: .any).matching(identifier: identifier).firstMatch
+        let candidates = app.descendants(matching: .any).matching(identifier: identifier).allElementsBoundByIndex
+        let visible = candidates.filter { !$0.frame.isEmpty }
+        let largest = visible.max { $0.frame.width * $0.frame.height < $1.frame.width * $1.frame.height }
+        return largest ?? candidates[0]
     }
 
     /// Identifiers of sidebar rows that are selected, or that sit inside a selected list cell.
