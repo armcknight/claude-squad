@@ -636,6 +636,67 @@ final class ClaudeSessionDetectorTests: XCTestCase {
         XCTAssertEqual(states["dup"]?.status, "waiting")
     }
 
+    func test_readLiveSessionStates_skipsMalformedFiles() throws {
+        let claudeDir = try makeTempClaudeDir()
+        defer { try? FileManager.default.removeItem(atPath: claudeDir) }
+
+        try writeSessionFile(pid: 1, sessionId: "good", status: "busy",
+                             waitingFor: nil, updatedAtMs: 1_000_000,
+                             in: claudeDir)
+        let sessionsDir = (claudeDir as NSString).appendingPathComponent("sessions")
+        let badPath = (sessionsDir as NSString).appendingPathComponent("2.json")
+        try "{not valid json".write(toFile: badPath, atomically: true, encoding: .utf8)
+
+        let states = detector.readLiveSessionStates(claudeDir: claudeDir)
+        XCTAssertEqual(states.count, 1)
+        XCTAssertEqual(states["good"]?.status, "busy")
+    }
+
+    // MARK: - Error handling for unreadable input
+
+    func test_parseSessionMetadataWithMalformedJSONReturnsNil() {
+        XCTAssertNil(detector.parseSessionMetadata("{\"cwd\": \"/tmp\", truncated"))
+    }
+
+    func test_determineStatus_ignoresMalformedTailLines() {
+        let lines = [
+            "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Done\"}]}}",
+            "{partial line",
+        ]
+        let status = detector.determineStatus(tailLines: lines, lastModified: Date())
+        guard case .waitingIdle = status else {
+            return XCTFail("Expected waitingIdle, got \(status)")
+        }
+    }
+
+    func test_effectiveModDate_returnsNilForMissingFile() {
+        let bogus = (NSTemporaryDirectory() as NSString)
+            .appendingPathComponent("missing_\(UUID().uuidString).jsonl")
+        XCTAssertNil(detector.effectiveModDate(jsonlPath: bogus))
+    }
+
+    func test_buildSubagents_returnsEmptyForMissingDir() {
+        let bogus = (NSTemporaryDirectory() as NSString)
+            .appendingPathComponent("missing_\(UUID().uuidString)")
+        XCTAssertTrue(detector.buildSubagents(parentJSONLPathWithoutExt: bogus).isEmpty)
+    }
+
+    func test_readTaskSummary_withoutHighwatermarkReturnsNil() throws {
+        let claudeDir = try makeTempClaudeDir()
+        defer { try? FileManager.default.removeItem(atPath: claudeDir) }
+        XCTAssertNil(detector.readTaskSummary(sessionId: "no-tasks", claudeDir: claudeDir))
+    }
+
+    func test_findPullRequestURL_findsURLInTail() throws {
+        let path = (NSTemporaryDirectory() as NSString)
+            .appendingPathComponent("test_pr_\(UUID().uuidString).jsonl")
+        try "{\"type\":\"pr-link\",\"url\":\"https://github.com/owner/repo/pull/42\"}\n"
+            .write(toFile: path, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(atPath: path) }
+
+        XCTAssertEqual(detector.findPullRequestURL(jsonlPath: path), "https://github.com/owner/repo/pull/42")
+    }
+
     func test_waitingQuestionText_mapsKnownWaitingFor() {
         let permission = ClaudeSessionDetector.LiveSessionState(
             sessionId: "s", status: "waiting",

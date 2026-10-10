@@ -3,10 +3,12 @@ import SwiftUI
 struct ChangelogView: View {
     let entries: [ChangelogEntry]
     let isWhatsNew: Bool
+    weak var logger: Logger?
 
-    init(entries: [ChangelogEntry], isWhatsNew: Bool = false) {
+    init(entries: [ChangelogEntry], isWhatsNew: Bool = false, logger: Logger?) {
         self.entries = entries
         self.isWhatsNew = isWhatsNew
+        self.logger = logger
     }
 
     var body: some View {
@@ -24,7 +26,7 @@ struct ChangelogView: View {
                         .foregroundStyle(.secondary)
                 } else {
                     ForEach(entries) { entry in
-                        ChangelogEntryView(entry: entry)
+                        ChangelogEntryView(entry: entry, logger: logger)
                     }
                 }
             }
@@ -36,6 +38,7 @@ struct ChangelogView: View {
 
 private struct ChangelogEntryView: View {
     let entry: ChangelogEntry
+    weak var logger: Logger?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -68,6 +71,12 @@ private struct ChangelogEntryView: View {
                 result += "\(line)\n"
             }
         }
-        return (try? AttributedString(markdown: result.trimmingCharacters(in: .whitespacesAndNewlines))) ?? AttributedString(result)
+        do {
+            return try AttributedString(markdown: result.trimmingCharacters(in: .whitespacesAndNewlines))
+        } catch {
+            // Fall back to plain text; the changelog is still readable without markdown styling.
+            logger?.warning("ChangelogView: cannot parse markdown for \(entry.version): \(error.localizedDescription)")
+            return AttributedString(result)
+        }
     }
 }

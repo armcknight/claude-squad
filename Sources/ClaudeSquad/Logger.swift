@@ -36,7 +36,12 @@ final class Logger {
         let bundleId = Bundle.main.bundleIdentifier ?? "com.armcknight.ClaudeSquad"
         let logDirectory = cachesDir.appendingPathComponent(bundleId).appendingPathComponent("Logs", isDirectory: true)
 
-        try? FileManager.default.createDirectory(at: logDirectory, withIntermediateDirectories: true)
+        do {
+            try FileManager.default.createDirectory(at: logDirectory, withIntermediateDirectories: true)
+        } catch {
+            // The console destination is already registered, so this still reaches a log.
+            log.error("Cannot create log directory at \(logDirectory.path): \(error.localizedDescription)")
+        }
 
         let dest = FileDestination()
         dest.logFileURL = logDirectory.appendingPathComponent("app.log")

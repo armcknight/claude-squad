@@ -4,9 +4,14 @@ import Foundation
 final class GitHelper {
     
     /// Reads the current git branch name from .git/HEAD.
-    static func readBranch(projectPath: String) -> String? {
+    static func readBranch(projectPath: String, logger: Logger? = nil) -> String? {
         let headPath = (projectPath as NSString).appendingPathComponent(".git/HEAD")
-        guard let content = try? String(contentsOfFile: headPath, encoding: .utf8) else {
+        let content: String
+        do {
+            content = try String(contentsOfFile: headPath, encoding: .utf8)
+        } catch {
+            // Not every session runs inside a git repository, so this is expected.
+            logger?.debug("GitHelper: cannot read \(headPath): \(error.localizedDescription)")
             return nil
         }
         let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -19,7 +24,7 @@ final class GitHelper {
     
     /// Reads git status information for a repository.
     /// Returns nil if the directory is not a git repository or git commands fail.
-    static func readStatus(projectPath: String) -> GitStatus? {
+    static func readStatus(projectPath: String, logger: Logger? = nil) -> GitStatus? {
         // Check if .git directory exists
         let gitDir = (projectPath as NSString).appendingPathComponent(".git")
         guard FileManager.default.fileExists(atPath: gitDir) else {
@@ -30,7 +35,7 @@ final class GitHelper {
         let isDirty = checkDirtyStatus(projectPath: projectPath)
         
         // Get ahead/behind counts
-        let (ahead, behind, hasRemote) = getAheadBehindCounts(projectPath: projectPath)
+        let (ahead, behind, hasRemote) = getAheadBehindCounts(projectPath: projectPath, logger: logger)
         
         return GitStatus(
             isDirty: isDirty,
@@ -52,9 +57,9 @@ final class GitHelper {
     
     /// Gets the number of commits ahead/behind the remote tracking branch.
     /// Returns (ahead, behind, hasRemote).
-    private static func getAheadBehindCounts(projectPath: String) -> (Int, Int, Bool) {
+    private static func getAheadBehindCounts(projectPath: String, logger: Logger?) -> (Int, Int, Bool) {
         // First check if there's a remote tracking branch
-        guard let branch = readBranch(projectPath: projectPath) else {
+        guard let branch = readBranch(projectPath: projectPath, logger: logger) else {
             return (0, 0, false)
         }
         

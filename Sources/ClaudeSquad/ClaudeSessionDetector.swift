@@ -5,6 +5,7 @@ import Foundation
 final class ClaudeSessionDetector {
 
     weak var logger: Logger?
+    weak var errorReporter: ErrorReporter?
 
     #if DEBUG
     /// Override to point at a different base directory (e.g. for mock data).
@@ -60,8 +61,12 @@ final class ClaudeSessionDetector {
         #if DEBUG
         // Touch fixture files that should appear "fresh" for running status.
         for path in runningFixturePaths {
-            try? FileManager.default.setAttributes(
-                [.modificationDate: Date()], ofItemAtPath: path)
+            do {
+                try FileManager.default.setAttributes(
+                    [.modificationDate: Date()], ofItemAtPath: path)
+            } catch {
+                logger?.warning("Cannot touch fixture \(path): \(error.localizedDescription)")
+            }
         }
         #endif
 
@@ -152,15 +157,20 @@ final class ClaudeSessionDetector {
     /// the directory does not exist.
     func readLiveSessionStates(claudeDir: String) -> [String: LiveSessionState] {
         let sessionsDir = (claudeDir as NSString).appendingPathComponent("sessions")
-        let fm = FileManager.default
-        guard let entries = try? fm.contentsOfDirectory(atPath: sessionsDir) else {
+        guard let entries = directoryContents(atPath: sessionsDir) else {
             return [:]
         }
         var result: [String: LiveSessionState] = [:]
         for entry in entries where entry.hasSuffix(".json") {
             let path = (sessionsDir as NSString).appendingPathComponent(entry)
-            guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
-                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let data: Data
+            do {
+                data = try Data(contentsOf: URL(fileURLWithPath: path))
+            } catch {
+                logger?.debug("Cannot read live session state \(entry): \(error.localizedDescription)")
+                continue
+            }
+            guard let json = jsonObject(from: data, source: entry) as? [String: Any],
                   let sessionId = json["sessionId"] as? String,
                   let status = json["status"] as? String else {
                 continue
@@ -221,7 +231,7 @@ final class ClaudeSessionDetector {
     /// Finds the most recent `.jsonl` file in each project subdirectory of `~/.claude/projects/`.
     func findProjectJSONLFiles(projectsDir: String) -> [String] {
         let fm = FileManager.default
-        guard let projectDirs = try? fm.contentsOfDirectory(atPath: projectsDir) else {
+        guard let projectDirs = directoryContents(atPath: projectsDir) else {
             logger?.info("Cannot list contents of \(projectsDir)")
             return []
         }
@@ -233,7 +243,7 @@ final class ClaudeSessionDetector {
             var isDir: ObjCBool = false
             guard fm.fileExists(atPath: fullDir, isDirectory: &isDir), isDir.boolValue else { continue }
 
-            guard let files = try? fm.contentsOfDirectory(atPath: fullDir) else { continue }
+            guard let files = directoryContents(atPath: fullDir) else { continue }
             let jsonlFiles = files.filter { $0.hasSuffix(".jsonl") }
             if jsonlFiles.isEmpty {
                 logger?.debug("  \(dir): no .jsonl files")
@@ -244,8 +254,7 @@ final class ClaudeSessionDetector {
             var bestDate: Date?
             for file in jsonlFiles {
                 let path = (fullDir as NSString).appendingPathComponent(file)
-                guard let attrs = try? fm.attributesOfItem(atPath: path),
-                      let mod = attrs[.modificationDate] as? Date else { continue }
+                guard let mod = modificationDate(ofItemAtPath: path) else { continue }
                 if bestDate == nil || mod > bestDate! {
                     bestPath = path
                     bestDate = mod
@@ -264,12 +273,10 @@ final class ClaudeSessionDetector {
     /// Analyzes a single JSONL file to build a `ClaudeSession`.
     /// Status is determined purely from JSONL content + file modification time.
     func analyzeSession(jsonlPath: String, claudeDir: String) -> ClaudeSession? {
-        let fm = FileManager.default
         let fileName = (jsonlPath as NSString).lastPathComponent
 
         // Get file modification date.
-        guard let attrs = try? fm.attributesOfItem(atPath: jsonlPath),
-              let lastModified = attrs[.modificationDate] as? Date else {
+        guard let lastModified = modificationDate(ofItemAtPath: jsonlPath) else {
             logger?.warning("Cannot read attributes for \(fileName)")
             return nil
         }
@@ -303,10 +310,10 @@ final class ClaudeSessionDetector {
         let effectiveLastModified = max(lastModified, effectiveModDate(jsonlPath: jsonlPath) ?? lastModified)
 
         // Prefer git branch from JSONL metadata, fall back to .git/HEAD.
-        let gitBranch = meta.gitBranch ?? GitHelper.readBranch(projectPath: cwd)
+        let gitBranch = meta.gitBranch ?? GitHelper.readBranch(projectPath: cwd, logger: logger)
 
         // Read git status (working directory clean/dirty, ahead/behind counts).
-        let gitStatus = GitHelper.readStatus(projectPath: cwd)
+        let gitStatus = GitHelper.readStatus(projectPath: cwd, logger: logger)
 
         // Read full task items and derive summary from them.
         let taskItems = readTaskItems(sessionId: sessionId, claudeDir: claudeDir)
@@ -346,8 +353,7 @@ final class ClaudeSessionDetector {
     /// under `<sub_without_ext>/subagents/`.
     func buildSubagents(parentJSONLPathWithoutExt: String) -> [Subagent] {
         let dir = parentJSONLPathWithoutExt + "/subagents"
-        let fm = FileManager.default
-        guard let files = try? fm.contentsOfDirectory(atPath: dir) else { return [] }
+        guard let files = directoryContents(atPath: dir) else { return [] }
 
         var subs: [Subagent] = []
         for file in files where file.hasSuffix(".jsonl") {
@@ -371,8 +377,7 @@ final class ClaudeSessionDetector {
         guard fileName.hasPrefix("agent-"), fileName.hasSuffix(".jsonl") else { return nil }
         let agentId = String(fileName.dropFirst("agent-".count).dropLast(".jsonl".count))
 
-        guard let attrs = try? fm.attributesOfItem(atPath: jsonlPath),
-              let lastModified = attrs[.modificationDate] as? Date else {
+        guard let lastModified = modificationDate(ofItemAtPath: jsonlPath) else {
             logger?.debug("Cannot read attributes for \(fileName)")
             return nil
         }
@@ -396,7 +401,7 @@ final class ClaudeSessionDetector {
         var subagentType: String?
         var taskDescription: String?
         if let data = fm.contents(atPath: metaJSONPath),
-           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+           let json = jsonObject(from: data, source: metaJSONPath) as? [String: Any] {
             subagentType = json["agentType"] as? String
             taskDescription = json["description"] as? String
         }
@@ -451,8 +456,7 @@ final class ClaudeSessionDetector {
                 linesScanned += 1
                 let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
                 if trimmed.isEmpty { continue }
-                guard let lineData = trimmed.data(using: .utf8),
-                      let json = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any] else {
+                guard let json = jsonDictionary(fromLine: trimmed, source: jsonlPath) else {
                     continue
                 }
                 let type = json["type"] as? String
@@ -490,9 +494,7 @@ final class ClaudeSessionDetector {
     /// reachable through nested `subagents/` directories. Used as a cache key so that
     /// subagent writes invalidate the cached session.
     func effectiveModDate(jsonlPath: String) -> Date? {
-        let fm = FileManager.default
-        guard let attrs = try? fm.attributesOfItem(atPath: jsonlPath),
-              let mainMod = attrs[.modificationDate] as? Date else { return nil }
+        guard let mainMod = modificationDate(ofItemAtPath: jsonlPath) else { return nil }
         let subagentDir = (jsonlPath as NSString).deletingPathExtension + "/subagents"
         if let subMax = maxJSONLModDate(in: subagentDir), subMax > mainMod {
             return subMax
@@ -503,13 +505,11 @@ final class ClaudeSessionDetector {
     /// Recursively finds the latest `.jsonl` modification date in `dir` and any nested
     /// `<file_without_ext>/subagents/` directories.
     private func maxJSONLModDate(in dir: String) -> Date? {
-        let fm = FileManager.default
-        guard let files = try? fm.contentsOfDirectory(atPath: dir) else { return nil }
+        guard let files = directoryContents(atPath: dir) else { return nil }
         var best: Date?
         for file in files where file.hasSuffix(".jsonl") {
             let path = (dir as NSString).appendingPathComponent(file)
-            if let attrs = try? fm.attributesOfItem(atPath: path),
-               let mod = attrs[.modificationDate] as? Date {
+            if let mod = modificationDate(ofItemAtPath: path) {
                 if best == nil || mod > best! { best = mod }
             }
             let nestedDir = (path as NSString).deletingPathExtension + "/subagents"
@@ -583,8 +583,7 @@ final class ClaudeSessionDetector {
     /// Parses a JSONL line to extract session metadata. Returns nil if this line
     /// doesn't contain `cwd` (e.g. it's a `file-history-snapshot` or `progress` line).
     func parseSessionMetadata(_ line: String) -> FirstLineInfo? {
-        guard let data = line.data(using: .utf8),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+        guard let json = jsonDictionary(fromLine: line, source: "session metadata") else {
             return nil
         }
 
@@ -656,8 +655,7 @@ final class ClaudeSessionDetector {
         let hasToolResultAfterLastAssistant = checkForToolResultAfterLastAssistant(tailLines: tailLines)
 
         for line in tailLines.reversed() {
-            guard let data = line.data(using: .utf8),
-                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            guard let json = jsonDictionary(fromLine: line, source: "tail line") else {
                 continue
             }
 
@@ -724,8 +722,7 @@ final class ClaudeSessionDetector {
         // tool_result appeared between it and the end of the file.
         var sawUserToolResult = false
         for line in tailLines.reversed() {
-            guard let data = line.data(using: .utf8),
-                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            guard let json = jsonDictionary(fromLine: line, source: "tail line") else {
                 continue
             }
             let type = json["type"] as? String
@@ -854,8 +851,13 @@ final class ClaudeSessionDetector {
         // a .highwatermark file containing the total task count. Account for
         // cleaned-up tasks by reading the highwatermark.
         let hwPath = (sessionTasksDir as NSString).appendingPathComponent(".highwatermark")
-        if let hwStr = try? String(contentsOfFile: hwPath, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines),
-           let hwTotal = Int(hwStr), hwTotal > total {
+        var hwStr: String?
+        do {
+            hwStr = try String(contentsOfFile: hwPath, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)
+        } catch {
+            logger?.debug("readTaskSummary(\(sessionId)): no highwatermark at \(hwPath): \(error.localizedDescription)")
+        }
+        if let hwStr, let hwTotal = Int(hwStr), hwTotal > total {
             let cleanedUp = hwTotal - total
             logger?.info("readTaskSummary(\(sessionId)): highwatermark=\(hwTotal), adding \(cleanedUp) cleaned-up tasks as completed")
             completed += cleanedUp
@@ -869,7 +871,7 @@ final class ClaudeSessionDetector {
 
     private func readTasksFromDirectory(_ dir: String, sessionId: String?, total: inout Int, completed: inout Int, inProgress: inout Int, pending: inout Int) {
         let fm = FileManager.default
-        guard let files = try? fm.contentsOfDirectory(atPath: dir) else {
+        guard let files = directoryContents(atPath: dir) else {
             logger?.info("readTasksFromDirectory: no directory at \(dir)")
             return
         }
@@ -881,7 +883,7 @@ final class ClaudeSessionDetector {
 
             let path = (dir as NSString).appendingPathComponent(file)
             guard let data = fm.contents(atPath: path),
-                  let json = try? JSONSerialization.jsonObject(with: data) else { continue }
+                  let json = jsonObject(from: data, source: path) else { continue }
 
             if let tasks = json as? [[String: Any]] {
                 for task in tasks {
@@ -916,7 +918,7 @@ final class ClaudeSessionDetector {
         var items: [TaskItem] = []
 
         // Read from tasks/<sessionId>/*.json
-        if let files = try? fm.contentsOfDirectory(atPath: sessionTasksDir) {
+        if let files = directoryContents(atPath: sessionTasksDir) {
             let jsonFiles = files.sorted().filter { $0.hasSuffix(".json") }
             logger?.info("readTaskItems(\(sessionId)): found \(jsonFiles.count) json files in tasksDir")
             for file in jsonFiles {
@@ -931,13 +933,13 @@ final class ClaudeSessionDetector {
         }
 
         // Read from todos/<sessionId>-*.json
-        if let files = try? fm.contentsOfDirectory(atPath: todosDir) {
+        if let files = directoryContents(atPath: todosDir) {
             let matching = files.sorted().filter { $0.hasSuffix(".json") && $0.hasPrefix(sessionId) }
             logger?.info("readTaskItems(\(sessionId)): found \(matching.count) matching json files in todosDir")
             for file in matching {
                 let path = (todosDir as NSString).appendingPathComponent(file)
                 if let data = fm.contents(atPath: path),
-                   let json = try? JSONSerialization.jsonObject(with: data) {
+                   let json = jsonObject(from: data, source: path) {
                     if let tasks = json as? [[String: Any]] {
                         for task in tasks {
                             if let item = parseTaskJSON(task) {
@@ -963,7 +965,7 @@ final class ClaudeSessionDetector {
 
     private func parseTaskFile(path: String) -> TaskItem? {
         guard let data = FileManager.default.contents(atPath: path),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+              let json = jsonObject(from: data, source: path) as? [String: Any] else {
             return nil
         }
         return parseTaskJSON(json)
@@ -1031,8 +1033,7 @@ final class ClaudeSessionDetector {
                     continue
                 }
 
-                guard let lineData = trimmed.data(using: .utf8),
-                      let json = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any] else {
+                guard let json = jsonDictionary(fromLine: trimmed, source: jsonlPath) else {
                     continue
                 }
 
@@ -1053,8 +1054,7 @@ final class ClaudeSessionDetector {
         let trimmed = buffer.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmed.isEmpty {
             linesRead += 1
-            if let lineData = trimmed.data(using: .utf8),
-               let json = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any],
+            if let json = jsonDictionary(fromLine: trimmed, source: jsonlPath),
                let msg = transcriptMessage(from: json) {
                 messages.append(msg)
             }
@@ -1244,7 +1244,19 @@ final class ClaudeSessionDetector {
         // Read a generous tail — PR links are typically near the end.
         let tailLines = readTailLines(filePath: jsonlPath, lineCount: 100)
         let prPattern = "https://github\\.com/[^/]+/[^/]+/pull/\\d+"
-        guard let regex = try? NSRegularExpression(pattern: prPattern) else { return nil }
+        let regex: NSRegularExpression
+        do {
+            regex = try NSRegularExpression(pattern: prPattern)
+        } catch {
+            // The pattern is a constant, so a failure here is a programmer error worth reporting.
+            logger?.error("findPullRequestURL: invalid PR URL pattern: \(error.localizedDescription)")
+            guard let errorReporter else {
+                logger?.warning("findPullRequestURL: errorReporter is nil, cannot report invalid pattern")
+                return nil
+            }
+            errorReporter.capture(error: error, context: ["pattern": prPattern])
+            return nil
+        }
 
         // Scan in reverse to find the most recent PR link.
         for line in tailLines.reversed() {
@@ -1269,4 +1281,49 @@ final class ClaudeSessionDetector {
         return nil
     }
 
+}
+
+// MARK: - Throwing call wrappers
+
+private extension ClaudeSessionDetector {
+    /// Lists the contents of a directory. Missing directories are expected (e.g. a
+    /// session with no subagents), so failures are logged at debug level only.
+    func directoryContents(atPath path: String) -> [String]? {
+        do {
+            return try FileManager.default.contentsOfDirectory(atPath: path)
+        } catch {
+            logger?.debug("Cannot list contents of \(path): \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    /// Returns the modification date of a file, or nil if its attributes can't be read.
+    func modificationDate(ofItemAtPath path: String) -> Date? {
+        do {
+            return try FileManager.default.attributesOfItem(atPath: path)[.modificationDate] as? Date
+        } catch {
+            logger?.debug("Cannot read attributes of \(path): \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    /// Parses JSON data. Files written by Claude Code may be mid-write or truncated,
+    /// so failures are logged rather than reported.
+    func jsonObject(from data: Data, source: String) -> Any? {
+        do {
+            return try JSONSerialization.jsonObject(with: data)
+        } catch {
+            logger?.debug("Cannot parse JSON from \(source): \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    /// Parses a single JSONL line into a dictionary.
+    func jsonDictionary(fromLine line: String, source: String) -> [String: Any]? {
+        guard let data = line.data(using: .utf8) else {
+            logger?.debug("Cannot encode JSONL line from \(source) as UTF-8")
+            return nil
+        }
+        return jsonObject(from: data, source: source) as? [String: Any]
+    }
 }
