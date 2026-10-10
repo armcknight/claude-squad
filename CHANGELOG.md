@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Added
+- Sessions running in Claude Code auto mode (or with `--dangerously-skip-permissions`) now show an orange warning icon next to their name in the sidebar, so you can see at a glance which sessions run tools without asking.
+
 ## [1.1.0] 2026-08-08
 
 ### Added
