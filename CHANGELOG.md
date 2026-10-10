@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+- Notifications for sessions that need input or become idle can now be turned on or off separately in Settings (General tab). Both are on by default.
+- Clicking a notification now brings the main window to the front and selects that session. Notifications also show as banners while Claude Squad is the frontmost app.
+
+### Fixed
+- Launching the app no longer posts a burst of notifications for sessions that were already waiting before it started.
+- Failures to post notifications or request notification permission are now reported.
+
 ## [1.1.0] 2026-08-08
 
 ### Added

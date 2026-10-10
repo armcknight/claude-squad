@@ -15,6 +15,7 @@ import UserNotifications
     private let globalHotkey = GlobalHotkey()
     private let detector: ClaudeSessionDetector
     private let monitor: SessionMonitor
+    private let notificationManager: NotificationManager
     private let versionManager = AppVersionManager()
     private var window: NSWindow?
     private var settingsWindow: NSWindow?
@@ -34,6 +35,13 @@ import UserNotifications
         // Analytics — no provider is wired up right now. The AnalyticsProvider
         // protocol and its call sites stay so one can be dropped in later.
         analyticsProvider = NoOpAnalyticsProvider()
+
+        notificationManager = NotificationManager(
+            center: UNUserNotificationCenter.current(),
+            logger: logger,
+            analytics: analyticsProvider,
+            errorReporter: errorReporter
+        )
 
         // Session detection
         #if DEBUG
@@ -70,7 +78,7 @@ import UserNotifications
         errorReporter.configure()
         analyticsProvider.configure()
 
-        requestNotificationAuthorization()
+        notificationManager.requestAuthorization()
 
         // Show the app in the Dock and App Switcher.
         NSApp.setActivationPolicy(.regular)
@@ -186,9 +194,9 @@ import UserNotifications
             settingsWindow.makeKeyAndOrderFront(nil)
             return
         }
-        let settingsView = SettingsView(monitor: monitor, loginItemManager: loginItemManager, globalHotkey: globalHotkey, logger: logger)
+        let settingsView = SettingsView(monitor: monitor, loginItemManager: loginItemManager, globalHotkey: globalHotkey, logger: logger, analytics: analyticsProvider)
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 400, height: 280),
+            contentRect: NSRect(x: 0, y: 0, width: 400, height: 380),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -214,19 +222,14 @@ import UserNotifications
 
     // MARK: - Notifications
 
-    private func requestNotificationAuthorization() {
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { [weak self] granted, error in
-            if let error {
-                self?.logger.error("Notification authorization failed: \(error.localizedDescription)")
-            } else {
-                self?.logger.info("Notification authorization granted: \(granted)")
-            }
-        }
-    }
-
     private func setupNotificationHandler() {
         monitor.onNeedsAttention = { [weak self] session in
-            self?.postNotification(for: session)
+            self?.notificationManager.postNotification(for: session)
+        }
+        notificationManager.onNotificationClicked = { [weak self] sessionID in
+            guard let self else { return }
+            self.showWindow()
+            self.monitor.requestedSelection = .session(sessionId: sessionID)
         }
     }
 
@@ -291,31 +294,5 @@ import UserNotifications
         window.center()
         window.makeKeyAndOrderFront(nil)
         self.changelogWindow = window
-    }
-
-    // MARK: - Notifications
-
-    private func postNotification(for session: ClaudeSession) {
-        let content = UNMutableNotificationContent()
-        content.sound = .default
-
-        switch session.status {
-        case .waitingForQuestion(_, let question):
-            content.title = "\(session.displayName) needs input"
-            content.body = question ?? "Claude is asking a question"
-        case .waitingIdle:
-            content.title = "\(session.displayName) is idle"
-            content.body = "Claude has finished and is waiting for your next instruction"
-        default:
-            return
-        }
-
-        let request = UNNotificationRequest(
-            identifier: "claude-squad-\(session.id)-\(session.status.sortPriority)",
-            content: content,
-            trigger: nil
-        )
-        logger.info("Posting notification for \(session.displayName): \(content.title)")
-        UNUserNotificationCenter.current().add(request)
     }
 }

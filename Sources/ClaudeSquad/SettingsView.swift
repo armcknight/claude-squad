@@ -5,11 +5,14 @@ struct SettingsView: View {
     let loginItemManager: LoginItemManagerProtocol
     let globalHotkey: GlobalHotkey
     weak var logger: Logger?
+    weak var analytics: AnalyticsProvider?
 
     @State private var launchAtLogin: Bool = false
     @State private var hotkeyCombo: GlobalHotkey.KeyCombo = .default
     @State private var selectedTab: SettingsTab = .general
     @State private var pollFrequency: TimeInterval = AppSettings.pollFrequency
+    @State private var notifyOnNeedsInput: Bool = AppSettings.notifyOnNeedsInput
+    @State private var notifyOnIdle: Bool = AppSettings.notifyOnIdle
 
     private let pollFrequencyOptions: [TimeInterval] = [1, 3, 5, 10, 30, 60]
 
@@ -37,11 +40,13 @@ struct SettingsView: View {
 
             Spacer()
         }
-        .frame(width: 400, height: 280)
+        .frame(width: 400, height: 380)
         .onAppear {
             launchAtLogin = loginItemManager.isEnabled
             hotkeyCombo = globalHotkey.currentCombo
             pollFrequency = AppSettings.pollFrequency
+            notifyOnNeedsInput = AppSettings.notifyOnNeedsInput
+            notifyOnIdle = AppSettings.notifyOnIdle
         }
     }
 
@@ -73,8 +78,32 @@ struct SettingsView: View {
                 AppSettings.pollFrequency = newValue
                 monitor.updateRefreshInterval(newValue)
             }
+
+            Section("Notifications") {
+                Toggle("When a session needs input", isOn: $notifyOnNeedsInput)
+                    .onChange(of: notifyOnNeedsInput) { _, newValue in
+                        AppSettings.notifyOnNeedsInput = newValue
+                        trackNotificationSettingChanged(setting: "needs_input", enabled: newValue)
+                    }
+                Toggle("When a session becomes idle", isOn: $notifyOnIdle)
+                    .onChange(of: notifyOnIdle) { _, newValue in
+                        AppSettings.notifyOnIdle = newValue
+                        trackNotificationSettingChanged(setting: "idle", enabled: newValue)
+                    }
+            }
         }
         .formStyle(.grouped)
+    }
+
+    private func trackNotificationSettingChanged(setting: String, enabled: Bool) {
+        guard let analytics else {
+            logger?.warning("SettingsView: analytics is nil")
+            return
+        }
+        analytics.track(event: AnalyticsEvent.notificationSettingChanged.rawValue, properties: [
+            "setting": setting,
+            "enabled": enabled
+        ])
     }
 
     private func pollFrequencyLabel(_ interval: TimeInterval) -> String {
