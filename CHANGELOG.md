@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Added
+- The sidebar can be navigated with the keyboard. The sidebar is focused when the window opens; Up/Down arrows move between sessions and subagents (skipping section and folder headers and the contents of collapsed groups), and Home/End jump to the first/last row.
+
 ## [1.1.0] 2026-08-08
 
 ### Added
