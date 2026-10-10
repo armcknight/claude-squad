@@ -81,11 +81,13 @@ struct SettingsView: View {
 
             Section("Notifications") {
                 Toggle("When a session needs input", isOn: $notifyOnNeedsInput)
+                    .accessibilityIdentifier("notify-on-needs-input-toggle")
                     .onChange(of: notifyOnNeedsInput) { _, newValue in
                         AppSettings.notifyOnNeedsInput = newValue
                         trackNotificationSettingChanged(setting: "needs_input", enabled: newValue)
                     }
                 Toggle("When a session becomes idle", isOn: $notifyOnIdle)
+                    .accessibilityIdentifier("notify-on-idle-toggle")
                     .onChange(of: notifyOnIdle) { _, newValue in
                         AppSettings.notifyOnIdle = newValue
                         trackNotificationSettingChanged(setting: "idle", enabled: newValue)
