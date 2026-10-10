@@ -787,6 +787,20 @@ final class ClaudeSessionDetectorTests: XCTestCase {
 
         XCTAssertEqual(try localDetector.detectSessions().first?.permissionMode, .auto)
     }
+
+    func test_detectSessions_readsPermissionModeFromMockFixtures() throws {
+        let mockBase = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .appendingPathComponent("../../Fixtures/MockData")
+            .standardizedFileURL.path
+        let localDetector = ClaudeSessionDetector()
+        localDetector.basePath = mockBase
+        let sessions = try localDetector.detectSessions()
+
+        let backend = try XCTUnwrap(sessions.first { $0.id == "bbbb2222-2222-2222-2222-222222222222" })
+        XCTAssertEqual(backend.permissionMode, .auto)
+        XCTAssertEqual(sessions.filter { $0.permissionMode?.showsWarning == true }.map(\.id), [backend.id])
+    }
     #endif
 
     // MARK: - Test helpers

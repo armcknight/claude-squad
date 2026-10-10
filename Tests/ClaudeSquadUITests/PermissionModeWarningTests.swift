@@ -20,18 +20,17 @@ final class PermissionModeWarningTests: XCTestCase {
     }
 
     func testAutoModeSessionShowsWarningIcon() throws {
-        let autoSessionId = "bbbb2222-2222-2222-2222-222222222222"
-        let defaultSessionId = "aaaa1111-1111-1111-1111-111111111111"
-
-        let autoRow = element(identifier: "session-row-\(autoSessionId)")
+        let autoRow = element(identifier: "session-row-bbbb2222-2222-2222-2222-222222222222")
         XCTAssertTrue(autoRow.waitForExistence(timeout: 10), "Auto mode session row not found")
+        XCTAssertTrue(element(identifier: "session-row-aaaa1111-1111-1111-1111-111111111111").exists,
+                      "Default mode session row not found")
 
-        let warning = element(identifier: "permission-mode-warning-\(autoSessionId)")
-        XCTAssertTrue(warning.exists, "Auto mode session has no warning icon")
-
-        XCTAssertTrue(element(identifier: "session-row-\(defaultSessionId)").exists, "Default mode session row not found")
-        XCTAssertFalse(element(identifier: "permission-mode-warning-\(defaultSessionId)").exists,
-                       "Session without auto mode shows a warning icon")
+        // The row's identifier overrides identifiers inside it, so find the icon
+        // by its accessibility label. Only the backend-api mock session is in auto mode.
+        let warnings = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label BEGINSWITH 'Auto mode is on'"))
+        XCTAssertTrue(warnings.firstMatch.waitForExistence(timeout: 5), "Auto mode session has no warning icon")
+        XCTAssertEqual(warnings.count, 1, "Warning icon shown on a session that is not in auto mode")
 
         takeScreenshot(named: "auto-mode-warning-sidebar")
 

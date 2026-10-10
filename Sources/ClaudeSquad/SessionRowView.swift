@@ -28,7 +28,6 @@ struct SessionRowView: View {
                             .foregroundStyle(.orange)
                             .help(mode.warningDescription)
                             .accessibilityLabel(mode.warningDescription)
-                            .accessibilityIdentifier("permission-mode-warning-\(session.id)")
                     }
 
                     Text(displayNameOverride ?? session.displayName)
