@@ -28,7 +28,6 @@ struct StatisticsView: View {
         .onAppear {
             store.refresh()
         }
-        .accessibilityIdentifier("statistics-view")
     }
 }
 
