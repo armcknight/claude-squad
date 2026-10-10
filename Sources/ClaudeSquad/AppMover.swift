@@ -3,9 +3,22 @@ import AppKit
 enum AppMover {
     private static let suppressionKey = "SuppressMoveToApplications"
 
+    /// Launch argument that skips the /Applications location check entirely.
+    /// Used by developers running from DerivedData, and passed explicitly by the UI tests.
+    static let skipLocationCheckArgument = "--skip-app-location-check"
+
     /// Returns true if the app is already in /Applications.
     static var isInApplicationsFolder: Bool {
-        Bundle.main.bundlePath.hasPrefix("/Applications/")
+        isInApplicationsFolder(bundlePath: Bundle.main.bundlePath)
+    }
+
+    static func isInApplicationsFolder(bundlePath: String) -> Bool {
+        bundlePath.hasPrefix("/Applications/")
+    }
+
+    /// Returns true if the launch arguments request skipping the location check.
+    static func shouldSkipLocationCheck(arguments: [String]) -> Bool {
+        arguments.contains(skipLocationCheckArgument)
     }
 
     /// Prompts the user to move the app to /Applications if it isn't already there.
@@ -15,6 +28,10 @@ enum AppMover {
         // to the host app — the test runner just hangs. Tests always run from
         // DerivedData, so the isInApplicationsFolder guard below never saves us.
         guard !isRunningUnderTest else { return }
+        guard !shouldSkipLocationCheck(arguments: CommandLine.arguments) else {
+            logger?.info("Skipping Applications folder check (\(skipLocationCheckArgument))")
+            return
+        }
         guard !isInApplicationsFolder else { return }
         guard !UserDefaults.standard.bool(forKey: suppressionKey) else {
             analytics?.track(event: AnalyticsEvent.moveToAppsSuppressed.rawValue, properties: nil)

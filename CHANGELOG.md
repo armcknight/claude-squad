@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Added
+- `--skip-app-location-check` launch argument skips the Move-to-Applications prompt. The ClaudeSquad scheme enables it by default for local runs from Xcode, and the UI tests pass it explicitly.
+
 ## [1.1.0] 2026-08-08
 
 ### Added

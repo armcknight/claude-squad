@@ -101,6 +101,7 @@ schemes:
       config: Debug
       commandLineArguments:
         "--mock": false
+        "--skip-app-location-check": true
     test:
       config: Debug
       targets:
