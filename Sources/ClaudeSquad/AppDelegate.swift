@@ -10,6 +10,7 @@ import UserNotifications
     private let logger = Logger()
     private let errorReporter: ErrorReporter
     private let analyticsProvider: AnalyticsProvider
+    private let appUpdater: AppUpdater
 
     private let loginItemManager = LoginItemManager()
     private let globalHotkey = GlobalHotkey()
@@ -34,6 +35,9 @@ import UserNotifications
         // Analytics — no provider is wired up right now. The AnalyticsProvider
         // protocol and its call sites stay so one can be dropped in later.
         analyticsProvider = NoOpAnalyticsProvider()
+
+        // Auto-update
+        appUpdater = Self.makeAppUpdater(logger: logger, analytics: analyticsProvider, errorReporter: errorReporter)
 
         // Session detection
         #if DEBUG
@@ -69,6 +73,7 @@ import UserNotifications
 
         errorReporter.configure()
         analyticsProvider.configure()
+        appUpdater.start()
 
         requestNotificationAuthorization()
 
@@ -147,6 +152,11 @@ import UserNotifications
         let appMenuItem = NSMenuItem()
         let appMenu = NSMenu()
         appMenu.addItem(withTitle: "About Claude Squad", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        if appUpdater.isAvailable {
+            let updateItem = NSMenuItem(title: "Check for Updates…", action: #selector(checkForUpdates), keyEquivalent: "")
+            updateItem.target = self
+            appMenu.addItem(updateItem)
+        }
         appMenu.addItem(.separator())
         let settingsItem = NSMenuItem(title: "Settings…", action: #selector(showSettings), keyEquivalent: ",")
         settingsItem.target = self
@@ -186,9 +196,9 @@ import UserNotifications
             settingsWindow.makeKeyAndOrderFront(nil)
             return
         }
-        let settingsView = SettingsView(monitor: monitor, loginItemManager: loginItemManager, globalHotkey: globalHotkey, logger: logger)
+        let settingsView = SettingsView(monitor: monitor, loginItemManager: loginItemManager, globalHotkey: globalHotkey, appUpdater: appUpdater, logger: logger)
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 400, height: 280),
+            contentRect: NSRect(x: 0, y: 0, width: 400, height: SettingsView.height(updatesAvailable: appUpdater.isAvailable)),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -199,6 +209,10 @@ import UserNotifications
         window.center()
         window.makeKeyAndOrderFront(nil)
         self.settingsWindow = window
+    }
+
+    @objc private func checkForUpdates() {
+        appUpdater.checkForUpdates()
     }
 
     // MARK: - Global Hotkey
@@ -317,5 +331,35 @@ import UserNotifications
         )
         logger.info("Posting notification for \(session.displayName): \(content.title)")
         UNUserNotificationCenter.current().add(request)
+    }
+}
+
+// MARK: - NSMenuItemValidation
+
+extension AppDelegate: NSMenuItemValidation {
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if menuItem.action == #selector(checkForUpdates) {
+            return appUpdater.canCheckForUpdates
+        }
+        return true
+    }
+}
+
+// MARK: - Auto-update
+
+private extension AppDelegate {
+    /// Debug builds never self-update. Release builds use Sparkle only when the feed URL and
+    /// EdDSA public key are both set in Info.plist.
+    static func makeAppUpdater(logger: Logger, analytics: AnalyticsProvider, errorReporter: ErrorReporter) -> AppUpdater {
+        #if DEBUG
+        logger.info("Auto-update disabled in Debug builds")
+        return NoOpAppUpdater()
+        #else
+        guard AppUpdaterConfiguration(infoDictionary: Bundle.main.infoDictionary) != nil else {
+            logger.warning("Auto-update disabled: SUFeedURL or SUPublicEDKey is missing from Info.plist")
+            return NoOpAppUpdater()
+        }
+        return SparkleAppUpdater(logger: logger, analytics: analytics, errorReporter: errorReporter)
+        #endif
     }
 }

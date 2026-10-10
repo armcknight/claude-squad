@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Added
+- Automatic updates via Sparkle. Claude Squad checks for new versions in the background and offers to install them. Use **Claude Squad → Check for Updates…** to check on demand, or turn automatic checks off under **Settings → General**.
+
 ## [1.1.0] 2026-08-08
 
 ### Added

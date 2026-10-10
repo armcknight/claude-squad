@@ -4,14 +4,21 @@ struct SettingsView: View {
     @ObservedObject var monitor: SessionMonitor
     let loginItemManager: LoginItemManagerProtocol
     let globalHotkey: GlobalHotkey
+    weak var appUpdater: AppUpdater?
     weak var logger: Logger?
 
     @State private var launchAtLogin: Bool = false
     @State private var hotkeyCombo: GlobalHotkey.KeyCombo = .default
     @State private var selectedTab: SettingsTab = .general
     @State private var pollFrequency: TimeInterval = AppSettings.pollFrequency
+    @State private var automaticallyChecksForUpdates: Bool = false
 
     private let pollFrequencyOptions: [TimeInterval] = [1, 3, 5, 10, 30, 60]
+
+    /// Window height. The update controls add two rows to the General tab.
+    static func height(updatesAvailable: Bool) -> CGFloat {
+        updatesAvailable ? 360 : 280
+    }
 
     enum SettingsTab: String, CaseIterable {
         case general = "General"
@@ -37,12 +44,19 @@ struct SettingsView: View {
 
             Spacer()
         }
-        .frame(width: 400, height: 280)
+        .frame(width: 400, height: Self.height(updatesAvailable: updatesAvailable))
         .onAppear {
             launchAtLogin = loginItemManager.isEnabled
             hotkeyCombo = globalHotkey.currentCombo
             pollFrequency = AppSettings.pollFrequency
+            if let appUpdater {
+                automaticallyChecksForUpdates = appUpdater.automaticallyChecksForUpdates
+            }
         }
+    }
+
+    private var updatesAvailable: Bool {
+        appUpdater?.isAvailable ?? false
     }
 
     private var generalTab: some View {
@@ -72,6 +86,29 @@ struct SettingsView: View {
             .onChange(of: pollFrequency) { _, newValue in
                 AppSettings.pollFrequency = newValue
                 monitor.updateRefreshInterval(newValue)
+            }
+
+            if updatesAvailable {
+                Toggle("Automatically Check for Updates", isOn: $automaticallyChecksForUpdates)
+                    .onChange(of: automaticallyChecksForUpdates) { _, newValue in
+                        guard let appUpdater else {
+                            logger?.warning("SettingsView: appUpdater is nil")
+                            return
+                        }
+                        // onAppear syncs the toggle from the updater; don't echo that back.
+                        guard appUpdater.automaticallyChecksForUpdates != newValue else { return }
+                        appUpdater.automaticallyChecksForUpdates = newValue
+                    }
+
+                LabeledContent("Updates") {
+                    Button("Check Now") {
+                        guard let appUpdater else {
+                            logger?.warning("SettingsView: appUpdater is nil")
+                            return
+                        }
+                        appUpdater.checkForUpdates()
+                    }
+                }
             }
         }
         .formStyle(.grouped)
