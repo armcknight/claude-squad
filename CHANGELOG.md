@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Changed
+- The app now uses [Pippin](https://github.com/TwoRingSoft/Pippin) (added as a git submodule) for changelog parsing and build-time git info. The in-app changelog no longer shows the `[Unreleased]` section, and the About tab marks the commit hash with `-dirty` when the build came from uncommitted changes.
+
 ## [1.1.0] 2026-08-08
 
 ### Added

@@ -24,6 +24,7 @@ extension ErrorReporter {
 
 // MARK: - Sentry implementation
 
+import Pippin
 import Sentry
 
 final class SentryErrorReporter: ErrorReporter {
@@ -47,16 +48,13 @@ final class SentryErrorReporter: ErrorReporter {
             options.enableAppHangTracking = false
         }
 
-        let info = Bundle.main.infoDictionary
+        let bundle = Bundle.main
 
         SentrySDK.configureScope { scope in
-            if let gitCommit = info?["GIT_COMMIT_HASH"] as? String, !gitCommit.isEmpty {
-                scope.setTag(value: gitCommit, key: "git.commit")
+            for (key, value) in bundle.gitInfoTags {
+                scope.setTag(value: value, key: key)
             }
-            if let gitBranch = info?["GIT_BRANCH_NAME"] as? String, !gitBranch.isEmpty {
-                scope.setTag(value: gitBranch, key: "git.branch")
-            }
-            if let appVersion = info?["CFBundleShortVersionString"] as? String {
+            if let appVersion = bundle.infoDictionary?["CFBundleShortVersionString"] as? String {
                 scope.setTag(value: appVersion, key: "app.version")
             }
         }
