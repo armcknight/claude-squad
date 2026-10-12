@@ -99,8 +99,10 @@ final class Logger {
 extension Logger {
     /// Deletes any log files in `directory` that exceed `maxFileSize`.
     ///
-    /// Rotation only triggers on the next write, and a rotated file is kept as-is,
-    /// so files that grew huge before rotation was enabled would otherwise linger.
+    /// SwiftyBeaver (as of 2.1.1) only rotates: on the next write it moves an oversized
+    /// `app.log` to `app.1.log` intact, and deletes that file only at the following
+    /// rotation, after another `logFileMaxSize` of logs has been written. Files that grew
+    /// huge before rotation was enabled would otherwise linger on disk until then.
     static func removeOversizedLogFiles(in directory: URL, maxFileSize: Int, fileManager: FileManager = .default) {
         let contents: [URL]
         do {
