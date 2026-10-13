@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Changed
+- Build tooling now comes from the shared [armcknight/tools](https://github.com/armcknight/tools) Homebrew cask, installed by `brew bundle`, in place of a duplicated shell script. `inject-git-info` writes `GIT_COMMIT_HASH`, `GIT_BRANCH` and `GIT_STATUS_CLEAN` into the built Info.plist as a post-build step, and `upload-symbols` uploads dSYMs to Sentry when credentials are available. The About tab and the Sentry scope (`git.clean` tag) now also show if the working tree was clean at build time.
+
 ## [1.1.0] 2026-08-08
 
 ### Added

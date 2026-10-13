@@ -57,9 +57,14 @@ targets:
           copyFiles:
             destination: resources
             subpath: ""
-    preBuildScripts:
+    postBuildScripts:
       - name: Inject Git Info
-        script: "${SRCROOT}/scripts/inject-git-info.sh"
+        script: '/opt/homebrew/bin/inject-git-info'
+        basedOnDependencyAnalysis: false
+      - name: Upload Symbols to Sentry
+        script: '/opt/homebrew/bin/upload-symbols || true'
+        basedOnDependencyAnalysis: false
+        showEnvVars: false
     dependencies:
       - package: SwiftyBeaver
       - target: Sentry/Sentry
