@@ -1,3 +1,4 @@
+{"type":"permission-mode","permissionMode":"auto","sessionId":"bbbb2222-2222-2222-2222-222222222222"}
 {"type":"user","cwd":"/Users/dev/Code/acme/backend-api","sessionId":"bbbb2222-2222-2222-2222-222222222222","gitBranch":"fix/rate-limiting","message":{"role":"user","content":"fix the rate limiting bug where requests from the same IP aren't being throttled correctly"}}
 {"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Let me investigate the rate limiting implementation."},{"type":"tool_use","id":"tool1","name":"Read","input":{"file_path":"src/middleware/rateLimit.ts"}}]}}
 {"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tool1","content":"export function rateLimit(config) { ... }"}]}}

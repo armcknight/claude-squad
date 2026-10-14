@@ -707,6 +707,102 @@ final class ClaudeSessionDetectorTests: XCTestCase {
         XCTAssertEqual(q, "Which approach?")
     }
 
+    // MARK: - Permission mode
+
+    func test_readPermissionMode_returnsMostRecentValue() {
+        let lines = [
+            "{\"type\":\"permission-mode\",\"permissionMode\":\"default\",\"sessionId\":\"s\"}",
+            "{\"type\":\"user\",\"permissionMode\":\"auto\",\"message\":{\"role\":\"user\",\"content\":\"go\"}}",
+            "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"ok\"}]}}"
+        ]
+        XCTAssertEqual(detector.readPermissionMode(tailLines: lines), "auto")
+    }
+
+    func test_readPermissionMode_returnsNilWhenAbsent() {
+        let lines = [
+            "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"go\"}}",
+            "not json"
+        ]
+        XCTAssertNil(detector.readPermissionMode(tailLines: lines))
+    }
+
+    func test_permissionMode_showsWarningOnlyForAutoAndBypass() {
+        XCTAssertTrue(PermissionMode.auto.showsWarning)
+        XCTAssertTrue(PermissionMode.bypassPermissions.showsWarning)
+        XCTAssertFalse(PermissionMode.default.showsWarning)
+        XCTAssertFalse(PermissionMode.acceptEdits.showsWarning)
+        XCTAssertFalse(PermissionMode.plan.showsWarning)
+    }
+
+    func test_analyzeSession_readsPermissionMode() throws {
+        let path = (NSTemporaryDirectory() as NSString)
+            .appendingPathComponent("permission_mode_\(UUID().uuidString).jsonl")
+        defer { try? FileManager.default.removeItem(atPath: path) }
+        let lines = [
+            "{\"type\":\"permission-mode\",\"permissionMode\":\"auto\",\"sessionId\":\"sess1\"}",
+            "{\"type\":\"user\",\"cwd\":\"/tmp/test-proj\",\"sessionId\":\"sess1\",\"message\":{\"role\":\"user\",\"content\":\"go\"}}"
+        ]
+        try lines.joined(separator: "\n").write(toFile: path, atomically: true, encoding: .utf8)
+
+        let session = try XCTUnwrap(detector.analyzeSession(jsonlPath: path, claudeDir: "/tmp/no-claude-dir"))
+        XCTAssertEqual(session.permissionMode, .auto)
+    }
+
+    func test_analyzeSession_permissionModeIsNilWhenAbsent() throws {
+        let path = (NSTemporaryDirectory() as NSString)
+            .appendingPathComponent("permission_mode_none_\(UUID().uuidString).jsonl")
+        defer { try? FileManager.default.removeItem(atPath: path) }
+        let line = "{\"type\":\"user\",\"cwd\":\"/tmp/test-proj\",\"sessionId\":\"sess1\",\"message\":{\"role\":\"user\",\"content\":\"go\"}}"
+        try line.write(toFile: path, atomically: true, encoding: .utf8)
+
+        let session = try XCTUnwrap(detector.analyzeSession(jsonlPath: path, claudeDir: "/tmp/no-claude-dir"))
+        XCTAssertNil(session.permissionMode)
+    }
+
+    #if DEBUG
+    func test_detectSessions_keepsCachedPermissionModeWhenOutOfTail() throws {
+        let claudeDir = (NSTemporaryDirectory() as NSString)
+            .appendingPathComponent("permission_mode_cache_\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(atPath: claudeDir) }
+        let projectDir = (claudeDir as NSString).appendingPathComponent("projects/-tmp-test-proj")
+        try FileManager.default.createDirectory(atPath: projectDir, withIntermediateDirectories: true)
+        let path = (projectDir as NSString).appendingPathComponent("sess1.jsonl")
+
+        var lines = [
+            "{\"type\":\"permission-mode\",\"permissionMode\":\"auto\",\"sessionId\":\"sess1\"}",
+            "{\"type\":\"user\",\"cwd\":\"/tmp/test-proj\",\"sessionId\":\"sess1\",\"message\":{\"role\":\"user\",\"content\":\"go\"}}"
+        ]
+        try lines.joined(separator: "\n").write(toFile: path, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSinceNow: -60)], ofItemAtPath: path)
+
+        let localDetector = ClaudeSessionDetector()
+        localDetector.basePath = claudeDir
+        XCTAssertEqual(try localDetector.detectSessions().first?.permissionMode, .auto)
+
+        // Push the permission-mode entry out of the scanned tail.
+        let filler = "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"ok\"}]}}"
+        lines += Array(repeating: filler, count: 150)
+        try lines.joined(separator: "\n").write(toFile: path, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: path)
+
+        XCTAssertEqual(try localDetector.detectSessions().first?.permissionMode, .auto)
+    }
+
+    func test_detectSessions_readsPermissionModeFromMockFixtures() throws {
+        let mockBase = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .appendingPathComponent("../../Fixtures/MockData")
+            .standardizedFileURL.path
+        let localDetector = ClaudeSessionDetector()
+        localDetector.basePath = mockBase
+        let sessions = try localDetector.detectSessions()
+
+        let backend = try XCTUnwrap(sessions.first { $0.id == "bbbb2222-2222-2222-2222-222222222222" })
+        XCTAssertEqual(backend.permissionMode, .auto)
+        XCTAssertEqual(sessions.filter { $0.permissionMode?.showsWarning == true }.map(\.id), [backend.id])
+    }
+    #endif
+
     // MARK: - Test helpers
 
     private func makeTempClaudeDir() throws -> String {
