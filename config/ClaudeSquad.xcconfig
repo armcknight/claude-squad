@@ -4,7 +4,9 @@ INFOPLIST_FILE = Sources/ClaudeSquad/Info.plist
 PRODUCT_BUNDLE_IDENTIFIER = io.mcknight.ClaudeSquad
 PRODUCT_NAME = ClaudeSquad
 
-CURRENT_PROJECT_VERSION = 1
+// Sparkle compares an appcast item's sparkle:version against CFBundleVersion, so the
+// build number must advance with every release. Tie it to the marketing version.
+CURRENT_PROJECT_VERSION = $(MARKETING_VERSION)
 MARKETING_VERSION = 1.1.0
 
 SWIFT_EMIT_LOC_STRINGS = YES
@@ -14,3 +16,11 @@ SDKROOT = macosx
 LD_RUNPATH_SEARCH_PATHS = $(inherited) @executable_path/../Frameworks
 
 ENABLE_HARDENED_RUNTIME = YES
+
+// Sparkle auto-update. The feed is served by GitHub Pages from docs/appcast.xml and is
+// updated by the appcast job in .github/workflows/release.yml. `$()` keeps xcconfig from
+// reading `//` as a comment.
+SPARKLE_FEED_URL = https:/$()/armcknight.github.io/claude-squad/appcast.xml
+// EdDSA public key printed by Sparkle's `generate_keys`. The matching private key goes in
+// the SPARKLE_PRIVATE_KEY repo secret. While this is empty, the app disables updates.
+SPARKLE_PUBLIC_ED_KEY =
