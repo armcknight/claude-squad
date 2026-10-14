@@ -1,5 +1,6 @@
 import AppKit
 import ArkanaKeys
+import Pippin
 import SwiftUI
 import UserNotifications
 
@@ -238,7 +239,7 @@ import UserNotifications
             logger.warning("Could not load CHANGELOG.md from bundle")
             return []
         }
-        return ChangelogEntry.parse(from: content)
+        return ChangelogParser.parse(from: content)
     }
 
     private func checkForChangelogOnLaunch() {
@@ -250,7 +251,7 @@ import UserNotifications
         let allEntries = loadChangelogEntries()
         let lastVersion = versionManager.lastLaunchedVersion ?? ""
         let currentVersion = versionManager.currentVersion ?? ""
-        let newEntries = ChangelogEntry.entriesBetween(lastVersion: lastVersion, currentVersion: currentVersion, from: allEntries)
+        let newEntries = ChangelogParser.entriesSince(lastVersion, upTo: currentVersion, from: allEntries)
 
         guard !newEntries.isEmpty else { return }
 
