@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Fixed
+- A running session no longer shows as idle because one of its subagents has finished. Only active subagents (running or needing input) now roll up into the parent's status, and subagents whose parent has written more than 30 seconds after their last activity are treated as stale and ignored.
+
 ## [1.1.0] 2026-08-08
 
 ### Added

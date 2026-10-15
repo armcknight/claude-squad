@@ -24,6 +24,12 @@ final class ClaudeSessionDetector {
     /// Chunk size for backward-seeking tail reads and forward head reads.
     private let chunkSize = 8192
 
+    /// A subagent whose last write is older than its parent's last write by more
+    /// than this is considered stale: the parent has moved on, so the subagent's
+    /// status must not roll up (e.g. a subagent killed mid-tool-use that would
+    /// otherwise look like it is waiting for approval forever).
+    private let staleSubagentThreshold: TimeInterval = 30
+
     /// Cache: JSONL file path → session metadata extracted from early lines.
     private var firstLineCache: [String: FirstLineInfo] = [:]
 
@@ -299,7 +305,7 @@ final class ClaudeSessionDetector {
         }
 
         // Effective status = highest-priority among self + all descendants.
-        let status = rollUpStatus(ownStatus: ownStatus, subagents: subagents)
+        let status = rollUpStatus(ownStatus: ownStatus, ownLastModified: lastModified, subagents: subagents)
         let effectiveLastModified = max(lastModified, effectiveModDate(jsonlPath: jsonlPath) ?? lastModified)
 
         // Prefer git branch from JSONL metadata, fall back to .git/HEAD.
@@ -477,13 +483,32 @@ final class ClaudeSessionDetector {
     }
 
     /// Rolls up the parent's effective status as the highest-priority status across
-    /// itself and all descendant subagents. Highest priority (lowest `sortPriority`)
-    /// wins. The "since" timestamps from the parent's own waiting statuses are kept
-    /// when the parent itself is the winner; otherwise the descendant's timestamp wins.
-    func rollUpStatus(ownStatus: SessionStatus, subagents: [Subagent]) -> SessionStatus {
-        let descendants = subagents.flatMap { $0.flattenedSelfAndDescendants }.map(\.status)
-        let all = [ownStatus] + descendants
+    /// itself and its live descendant subagents. Highest priority (lowest `sortPriority`)
+    /// wins. Only live descendants contribute — see `liveDescendantStatuses`.
+    func rollUpStatus(ownStatus: SessionStatus, ownLastModified: Date, subagents: [Subagent]) -> SessionStatus {
+        let all = [ownStatus] + liveDescendantStatuses(of: subagents, parentLastModified: ownLastModified)
         return all.min(by: { $0.sortPriority < $1.sortPriority }) ?? ownStatus
+    }
+
+    /// Statuses of descendant subagents that should influence their ancestor's status.
+    /// A subagent contributes only if it is still active (`running` or
+    /// `waitingForQuestion`): idle, interrupted, and inactive subagents have finished
+    /// and returned control to their parent. A subagent (and its subtree) is also
+    /// skipped when stale, i.e. its parent has written well after it last did.
+    private func liveDescendantStatuses(of subagents: [Subagent], parentLastModified: Date) -> [SessionStatus] {
+        subagents.flatMap { sub -> [SessionStatus] in
+            guard parentLastModified.timeIntervalSince(sub.lastModified) <= staleSubagentThreshold else {
+                logger?.debug("  Ignoring stale subagent \(sub.id) for status rollup")
+                return []
+            }
+            let nested = liveDescendantStatuses(of: sub.subagents, parentLastModified: sub.lastModified)
+            switch sub.status {
+            case .running, .waitingForQuestion:
+                return [sub.status] + nested
+            case .waitingIdle, .interrupted, .inactive:
+                return nested
+            }
+        }
     }
 
     /// Returns the max modification date across the main JSONL and any subagent JSONLs

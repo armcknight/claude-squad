@@ -330,7 +330,7 @@ struct ClaudeSession: Identifiable {
     var ownStatus: SessionStatus
 
     /// Effective status used for sidebar grouping/sorting. Computed as the
-    /// highest-priority status among (ownStatus, all descendant subagents),
+    /// highest-priority status among (ownStatus, all live descendant subagents),
     /// so that a session whose deepest subagent needs input bubbles up to
     /// the "Needs Input" section. Defaults to `ownStatus` until rollup runs.
     var status: SessionStatus
