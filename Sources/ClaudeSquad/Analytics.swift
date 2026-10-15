@@ -38,6 +38,9 @@ enum AnalyticsEvent: String {
     // Settings
     case pollIntervalChanged = "poll_interval_changed"
 
+    // Statistics
+    case statisticsOpened = "statistics_opened"
+
     // Actions
     case copyPath = "copy_path"
     case copyBranch = "copy_branch"

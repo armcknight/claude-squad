@@ -15,10 +15,12 @@ import UserNotifications
     private let globalHotkey = GlobalHotkey()
     private let detector: ClaudeSessionDetector
     private let monitor: SessionMonitor
+    private let statisticsStore: StatisticsStore
     private let versionManager = AppVersionManager()
     private var window: NSWindow?
     private var settingsWindow: NSWindow?
     private var changelogWindow: NSWindow?
+    private var statisticsWindow: NSWindow?
 
     override init() {
         let keys = ArkanaKeys.Global()
@@ -41,7 +43,9 @@ import UserNotifications
             let mockMonitor = SessionMonitor.mock(logger: logger)
             self.detector = ClaudeSessionDetector() // unused in mock, but needed for stored property
             self.monitor = mockMonitor
+            self.statisticsStore = StatisticsStore(claudeBasePath: mockMonitor.claudeBasePath)
             super.init()
+            configureStatisticsStore()
             return
         }
         #endif
@@ -54,8 +58,10 @@ import UserNotifications
         monitor.logger = logger
         monitor.analytics = analyticsProvider
         self.monitor = monitor
+        self.statisticsStore = StatisticsStore(claudeBasePath: monitor.claudeBasePath)
 
         super.init()
+        configureStatisticsStore()
 
         // TranscriptLoader is @MainActor — set logger after init on main thread.
         DispatchQueue.main.async { [weak self] in
@@ -151,6 +157,10 @@ import UserNotifications
         let settingsItem = NSMenuItem(title: "Settings…", action: #selector(showSettings), keyEquivalent: ",")
         settingsItem.target = self
         appMenu.addItem(settingsItem)
+        let statisticsItem = NSMenuItem(title: "Statistics…", action: #selector(showStatistics), keyEquivalent: "s")
+        statisticsItem.keyEquivalentModifierMask = [.command, .shift]
+        statisticsItem.target = self
+        appMenu.addItem(statisticsItem)
         appMenu.addItem(.separator())
         let changelogItem = NSMenuItem(title: "What's New...", action: #selector(showChangelog), keyEquivalent: "")
         changelogItem.target = self
@@ -199,6 +209,39 @@ import UserNotifications
         window.center()
         window.makeKeyAndOrderFront(nil)
         self.settingsWindow = window
+    }
+
+    // MARK: - Statistics
+
+    private func configureStatisticsStore() {
+        // StatisticsStore is @MainActor — set dependencies on the main thread.
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.statisticsStore.logger = self.logger
+            self.statisticsStore.errorReporter = self.errorReporter
+        }
+    }
+
+    @MainActor @objc private func showStatistics() {
+        analyticsProvider.track(event: AnalyticsEvent.statisticsOpened.rawValue)
+        if let statisticsWindow, statisticsWindow.isVisible {
+            statisticsWindow.makeKeyAndOrderFront(nil)
+            statisticsStore.refresh()
+            return
+        }
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 640, height: 600),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.title = "Statistics"
+        window.contentViewController = NSHostingController(rootView: StatisticsView(store: statisticsStore))
+        window.setFrameAutosaveName("StatisticsWindow")
+        window.center()
+        window.makeKeyAndOrderFront(nil)
+        self.statisticsWindow = window
     }
 
     // MARK: - Global Hotkey

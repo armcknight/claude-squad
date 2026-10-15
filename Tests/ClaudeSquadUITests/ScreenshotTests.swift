@@ -56,6 +56,19 @@ final class ScreenshotTests: XCTestCase {
         takeScreenshot(named: "05-subagent-detail")
     }
 
+    func testScreenshot_06_Statistics() throws {
+        app.typeKey("s", modifierFlags: [.command, .shift])
+        let window = app.windows["Statistics"]
+        XCTAssertTrue(window.waitForExistence(timeout: 5), "Statistics window did not open")
+        // Badges are lower in a lazy grid and may not be rendered yet, so wait
+        // for the first tile, which only appears once statistics have loaded.
+        let totalSessions = window.staticTexts["Total sessions"]
+        XCTAssertTrue(totalSessions.waitForExistence(timeout: 10), "Statistics did not finish loading")
+        XCTAssertTrue(window.staticTexts["Longest idle gap"].exists, "Longest idle gap tile is missing")
+        XCTAssertTrue(window.staticTexts["Most concurrent"].exists, "Most concurrent tile is missing")
+        takeScreenshot(of: window, named: "06-statistics")
+    }
+
     // MARK: - Helpers
 
     /// Collects all section headers and session rows in document order,
@@ -87,7 +100,11 @@ final class ScreenshotTests: XCTestCase {
     }
 
     private func takeScreenshot(named name: String) {
-        let screenshot = app.windows.firstMatch.screenshot()
+        takeScreenshot(of: app.windows.firstMatch, named: name)
+    }
+
+    private func takeScreenshot(of element: XCUIElement, named name: String) {
+        let screenshot = element.screenshot()
         let attachment = XCTAttachment(screenshot: screenshot)
         attachment.name = name
         attachment.lifetime = .keepAlways
