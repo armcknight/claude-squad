@@ -24,7 +24,7 @@ macOS menubar app that monitors Claude Code CLI sessions.
 - Constructor-based DI everywhere. The composition root is `AppDelegate`, which owns all top-level dependencies as strong `let` properties and passes them down.
 - Store injected reference-type dependencies as `weak var` in all other types. Guard-let at every access site and log a warning if nil.
 - When a class needs a dependency only to pass it further down, still accept it in init and store it.
-- Protocols for swappable services: `ErrorReporter`, `AnalyticsProvider`. Concrete implementations (Sentry, Amplitude) and no-op implementations for testing.
+- Protocols for swappable services: `ErrorReporter`, `AnalyticsProvider`. `ErrorReporter` has a Sentry implementation; `AnalyticsProvider` currently has only the no-op one (Amplitude was removed). Both have no-op implementations for testing.
 - When converting a singleton to DI, check all call sites including tests.
 
 ### Thread Safety

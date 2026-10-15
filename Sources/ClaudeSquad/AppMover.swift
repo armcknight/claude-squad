@@ -11,6 +11,10 @@ enum AppMover {
     /// Prompts the user to move the app to /Applications if it isn't already there.
     /// Respects a "Don't Ask Again" preference.
     static func offerToMoveIfNeeded(logger: Logger?, analytics: AnalyticsProvider?, errorReporter: ErrorReporter?) {
+        // A modal blocks the main thread, which stops XCTest from ever connecting
+        // to the host app — the test runner just hangs. Tests always run from
+        // DerivedData, so the isInApplicationsFolder guard below never saves us.
+        guard !isRunningUnderTest else { return }
         guard !isInApplicationsFolder else { return }
         guard !UserDefaults.standard.bool(forKey: suppressionKey) else {
             analytics?.track(event: AnalyticsEvent.moveToAppsSuppressed.rawValue, properties: nil)
@@ -72,5 +76,14 @@ enum AppMover {
             errorAlert.runModal()
             return false
         }
+    }
+}
+
+private extension AppMover {
+    /// True when hosted by XCTest (unit tests) or launched by the UI tests, which
+    /// pass `--mock`.
+    static var isRunningUnderTest: Bool {
+        ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+            || ProcessInfo.processInfo.arguments.contains("--mock")
     }
 }

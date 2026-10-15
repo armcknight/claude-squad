@@ -123,6 +123,43 @@
             color: var(--gray-400);
         }
 
+        /* Install command block */
+        .install {
+            max-width: 560px;
+            margin: 0 auto 1.5rem;
+            text-align: left;
+            background: var(--gray-900);
+            border-radius: 12px;
+            padding: 1rem 1.25rem;
+            box-shadow: 0 4px 14px rgba(17, 24, 39, 0.18);
+            overflow-x: auto;
+        }
+        .install-label {
+            display: block;
+            font-size: 0.75rem;
+            font-weight: 600;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            color: var(--purple-light);
+            margin-bottom: 0.6rem;
+        }
+        .install pre {
+            margin: 0;
+            font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace;
+            font-size: 0.85rem;
+            line-height: 1.7;
+            color: var(--gray-100);
+            white-space: pre;
+        }
+        .install .prompt { color: var(--gray-400); user-select: none; }
+        .alt-install {
+            margin-top: 1rem;
+            font-size: 0.9rem;
+            color: var(--gray-600);
+        }
+        .alt-install a { color: var(--purple); text-decoration: none; font-weight: 600; }
+        .alt-install a:hover { text-decoration: underline; }
+
         /* Features */
         .features {
             max-width: 1080px;
@@ -313,11 +350,14 @@
 <section class="hero">
     <h1>Monitor all your <span class="highlight">Claude Code</span> sessions in one place</h1>
     <p>A native macOS app that watches every Claude Code CLI session running on your machine. See who needs input, read transcripts, and jump to PRs — without switching terminals.</p>
-    <a href="https://github.com/armcknight/claude-squad/releases" class="cta">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-        Download for macOS
-    </a>
-    <p class="subtitle">Requires macOS 14 Sonoma or later</p>
+    <div class="install">
+        <span class="install-label">Install with Homebrew</span>
+<pre><span class="prompt">$ </span>brew tap armcknight/tools
+<span class="prompt">$ </span>brew trust armcknight/tools
+<span class="prompt">$ </span>brew install --cask armcknight/tools/claude-squad</pre>
+    </div>
+    <p class="alt-install">Or <a href="https://github.com/armcknight/claude-squad/releases/latest">download the latest release</a> and drag it to Applications.</p>
+    <p class="subtitle">Requires macOS 14 Sonoma or later. Signed with a Developer ID certificate and notarized by Apple, so it opens without a Gatekeeper warning.</p>
 
 
 </section>
@@ -396,8 +436,8 @@
             <div class="step">
                 <div class="step-num">3</div>
                 <div>
-                    <h3>Monitor from the window or menu bar</h3>
-                    <p>Use the main window for a full overview with transcripts and details, or glance at the menu bar icon for a quick status check.</p>
+                    <h3>Summon it with a keystroke</h3>
+                    <p>A global shortcut — <strong>⌘⇧C</strong> by default, and configurable in Settings — brings the window forward from whatever app you are in, so a status check never costs you a window hunt.</p>
                 </div>
             </div>
         </div>
@@ -407,7 +447,11 @@
 <section class="final-cta">
     <h2>Stop losing track of your Claude sessions</h2>
     <p>Free, open source, and built for developers who run multiple Claude Code sessions.</p>
-    <a href="https://github.com/armcknight/claude-squad/releases" class="cta">
+    <div class="install">
+        <span class="install-label">Install with Homebrew</span>
+<pre><span class="prompt">$ </span>brew install --cask armcknight/tools/claude-squad</pre>
+    </div>
+    <a href="https://github.com/armcknight/claude-squad/releases/latest" class="cta">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
         Download for macOS
     </a>
