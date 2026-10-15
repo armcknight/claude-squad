@@ -59,10 +59,10 @@ final class SessionMonitor: ObservableObject {
         // sliding into "interrupted" via staleness.
         let runningSubagentIds = ["aaa111aaa111aaa11", "ccc333ccc333ccc33"]
         let projectsDir = (mockBase as NSString).appendingPathComponent("projects")
-        if let dirs = try? FileManager.default.contentsOfDirectory(atPath: projectsDir) {
+        if let dirs = mockDirectoryContents(atPath: projectsDir, logger: logger) {
             for dir in dirs {
                 let fullDir = (projectsDir as NSString).appendingPathComponent(dir)
-                if let files = try? FileManager.default.contentsOfDirectory(atPath: fullDir) {
+                if let files = mockDirectoryContents(atPath: fullDir, logger: logger) {
                     for file in files where file.hasSuffix(".jsonl") {
                         if runningSessionIds.contains(where: { file.hasPrefix($0) }) {
                             let path = (fullDir as NSString).appendingPathComponent(file)
@@ -73,7 +73,7 @@ final class SessionMonitor: ObservableObject {
             }
             // Walk subagent directories recursively, touching any `agent-<id>.jsonl`
             // whose id matches a running subagent.
-            collectRunningSubagentPaths(in: projectsDir, ids: runningSubagentIds, into: &detector.runningFixturePaths)
+            collectRunningSubagentPaths(in: projectsDir, ids: runningSubagentIds, logger: logger, into: &detector.runningFixturePaths)
         }
         let monitor = SessionMonitor(detector: detector, refreshInterval: AppSettings.defaultPollFrequency)
         monitor.logger = logger
@@ -88,14 +88,14 @@ final class SessionMonitor: ObservableObject {
     /// Recursively walks `dir`, collecting paths of any `agent-<id>.jsonl` whose
     /// filename matches one of `ids`. Used by mock mode so running subagents stay
     /// fresh and don't slide into "interrupted" via staleness.
-    private static func collectRunningSubagentPaths(in dir: String, ids: [String], into paths: inout [String]) {
+    private static func collectRunningSubagentPaths(in dir: String, ids: [String], logger: Logger, into paths: inout [String]) {
         let fm = FileManager.default
-        guard let entries = try? fm.contentsOfDirectory(atPath: dir) else { return }
+        guard let entries = mockDirectoryContents(atPath: dir, logger: logger) else { return }
         for entry in entries {
             let path = (dir as NSString).appendingPathComponent(entry)
             var isDir: ObjCBool = false
             if fm.fileExists(atPath: path, isDirectory: &isDir), isDir.boolValue {
-                collectRunningSubagentPaths(in: path, ids: ids, into: &paths)
+                collectRunningSubagentPaths(in: path, ids: ids, logger: logger, into: &paths)
             } else if entry.hasPrefix("agent-"), entry.hasSuffix(".jsonl"),
                       ids.contains(where: { entry.contains($0) }) {
                 paths.append(path)
@@ -214,3 +214,17 @@ final class SessionMonitor: ObservableObject {
         previousStatusType = previousStatusType.filter { currentIDs.contains($0.key) }
     }
 }
+
+#if DEBUG
+private extension SessionMonitor {
+    /// Lists a mock fixture directory, logging and returning nil on failure.
+    static func mockDirectoryContents(atPath path: String, logger: Logger) -> [String]? {
+        do {
+            return try FileManager.default.contentsOfDirectory(atPath: path)
+        } catch {
+            logger.warning("Cannot list mock fixture directory \(path): \(error.localizedDescription)")
+            return nil
+        }
+    }
+}
+#endif
