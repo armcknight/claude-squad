@@ -31,13 +31,9 @@ import UserNotifications
             errorReporter = NoOpErrorReporter()
         }
 
-        // Analytics
-        let amplitudeKey = keys.amplitudeAPIKey
-        if !amplitudeKey.isEmpty {
-            analyticsProvider = AmplitudeAnalyticsProvider(apiKey: amplitudeKey)
-        } else {
-            analyticsProvider = NoOpAnalyticsProvider()
-        }
+        // Analytics — no provider is wired up right now. The AnalyticsProvider
+        // protocol and its call sites stay so one can be dropped in later.
+        analyticsProvider = NoOpAnalyticsProvider()
 
         // Session detection
         #if DEBUG

@@ -38,12 +38,14 @@ final class SentryErrorReporter: ErrorReporter {
             options.dsn = self.dsn
             options.tracesSampleRate = 0.2
             options.enableMetricKit = true
+            options.enableAppHangTracking = false
             #if DEBUG
             options.debug = true
             options.environment = "debug"
             #else
             options.environment = "release"
             #endif
+            options.enableAppHangTracking = false
         }
 
         let info = Bundle.main.infoDictionary
