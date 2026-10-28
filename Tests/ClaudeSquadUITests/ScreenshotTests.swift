@@ -9,7 +9,7 @@ final class ScreenshotTests: XCTestCase {
     override func setUpWithError() throws {
         continueAfterFailure = false
         app = XCUIApplication()
-        app.launchArguments = ["--mock"]
+        app.launchArguments = ["--mock", "--skip-app-location-check"]
         app.launch()
 
         // Wait for the window and sessions to load.
