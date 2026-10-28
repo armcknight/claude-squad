@@ -48,6 +48,7 @@ import UserNotifications
 
         let detector = ClaudeSessionDetector()
         detector.logger = logger
+        detector.errorReporter = errorReporter
         self.detector = detector
 
         let monitor = SessionMonitor(detector: detector, refreshInterval: AppSettings.pollFrequency)
@@ -233,12 +234,19 @@ import UserNotifications
     // MARK: - Changelog
 
     private func loadChangelogEntries() -> [ChangelogEntry] {
-        guard let url = Bundle.main.url(forResource: "CHANGELOG", withExtension: "md"),
-              let content = try? String(contentsOf: url) else {
-            logger.warning("Could not load CHANGELOG.md from bundle")
+        guard let url = Bundle.main.url(forResource: "CHANGELOG", withExtension: "md") else {
+            logger.warning("Could not find CHANGELOG.md in bundle")
+            errorReporter.capture(message: "CHANGELOG.md missing from bundle", level: .warning, context: nil)
             return []
         }
-        return ChangelogEntry.parse(from: content)
+        do {
+            let content = try String(contentsOf: url, encoding: .utf8)
+            return ChangelogEntry.parse(from: content)
+        } catch {
+            logger.error("Could not read CHANGELOG.md from bundle: \(error.localizedDescription)")
+            errorReporter.capture(error: error, context: ["path": url.path])
+            return []
+        }
     }
 
     private func checkForChangelogOnLaunch() {
@@ -278,7 +286,7 @@ import UserNotifications
             return
         }
 
-        let view = ChangelogView(entries: entries, isWhatsNew: isWhatsNew)
+        let view = ChangelogView(entries: entries, isWhatsNew: isWhatsNew, logger: logger)
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 550, height: 500),
             styleMask: [.titled, .closable, .resizable],

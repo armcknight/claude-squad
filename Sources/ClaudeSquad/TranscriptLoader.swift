@@ -41,8 +41,7 @@ final class TranscriptLoader: ObservableObject {
         if case .loading = loadStates[key] { return }
 
         // Check if file has changed since we last loaded.
-        if let attrs = try? FileManager.default.attributesOfItem(atPath: jsonlPath),
-           let modDate = attrs[.modificationDate] as? Date,
+        if let modDate = Self.modificationDate(ofItemAtPath: jsonlPath, logger: logger),
            let lastMod = transcriptModDates[key],
            modDate == lastMod,
            cachedTranscripts[key] != nil {
@@ -54,7 +53,7 @@ final class TranscriptLoader: ObservableObject {
         loadStates[key] = .loading(progress: 0.0)
 
         // Fire-and-forget detached task so it survives view recreation.
-        Task.detached(priority: .userInitiated) { [weak self, detector] in
+        Task.detached(priority: .userInitiated) { [weak self, detector, weak logger = self.logger] in
             var lastEmitTime: CFAbsoluteTime = 0
             let transcript = detector.readTranscript(jsonlPath: jsonlPath) { progress in
                 let now = CFAbsoluteTimeGetCurrent()
@@ -65,7 +64,7 @@ final class TranscriptLoader: ObservableObject {
                     }
                 }
             }
-            let modDate = (try? FileManager.default.attributesOfItem(atPath: jsonlPath))?[.modificationDate] as? Date
+            let modDate = TranscriptLoader.modificationDate(ofItemAtPath: jsonlPath, logger: logger)
 
             await MainActor.run {
                 guard let self else { return }
@@ -99,5 +98,18 @@ final class TranscriptLoader: ObservableObject {
             result[i].subagents = applyToSubagents(result[i].subagents)
         }
         return result
+    }
+}
+
+private extension TranscriptLoader {
+    /// Returns the modification date of a transcript file, or nil if its attributes
+    /// can't be read (e.g. the file was removed between polls).
+    nonisolated static func modificationDate(ofItemAtPath path: String, logger: Logger?) -> Date? {
+        do {
+            return try FileManager.default.attributesOfItem(atPath: path)[.modificationDate] as? Date
+        } catch {
+            logger?.debug("TranscriptLoader: cannot read attributes of \(path): \(error.localizedDescription)")
+            return nil
+        }
     }
 }
