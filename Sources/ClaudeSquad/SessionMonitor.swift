@@ -32,6 +32,11 @@ final class SessionMonitor: ObservableObject {
     /// Callback fired when a session transitions to a state needing attention.
     var onNeedsAttention: ((_ session: ClaudeSession) -> Void)?
 
+    /// Base `.claude` directory the detector reads from (mock fixtures in `--mock` mode).
+    var claudeBasePath: String {
+        detector.claudeBasePath()
+    }
+
     init(detector: ClaudeSessionDetector, refreshInterval: TimeInterval) {
         self.detector = detector
         self.refreshInterval = refreshInterval
