@@ -4,6 +4,7 @@ import SwiftUI
 struct SessionListView: View {
     @ObservedObject var monitor: SessionMonitor
     @State private var selection: SidebarSelection?
+    @FocusState private var isSidebarFocused: Bool
 
     var body: some View {
         NavigationSplitView {
@@ -47,6 +48,12 @@ struct SessionListView: View {
             }
             .listStyle(.sidebar)
             .scrollContentBackground(.visible)
+            .focused($isSidebarFocused)
+            .onKeyPress(.upArrow) { moveSelection(.previous) }
+            .onKeyPress(.downArrow) { moveSelection(.next) }
+            .onKeyPress(.home) { moveSelection(.first) }
+            .onKeyPress(.end) { moveSelection(.last) }
+            .onAppear { isSidebarFocused = true }
             .navigationSplitViewColumnWidth(min: 280, ideal: 340)
             .toolbar {
                 ToolbarItem {
@@ -110,7 +117,7 @@ struct SessionListView: View {
             return pathTreeView(node: node.children[0], priority: priority)
         } else {
             // Directory group header
-            let key = "\(priority):\(node.fullPath)"
+            let key = sidebarDirectoryKey(priority: priority, fullPath: node.fullPath)
             let isExpanded = expandedDirs[key] ?? true
 
             return AnyView(Group {
@@ -187,6 +194,23 @@ struct SessionListView: View {
             }
         }
         return result
+    }
+
+    // MARK: - Keyboard navigation
+
+    /// Moves the sidebar selection over visible session and subagent rows,
+    /// skipping section and folder headers.
+    private func moveSelection(_ direction: SidebarNavigationDirection) -> KeyPress.Result {
+        let items = visibleSidebarSelections(
+            sessions: monitor.sessions,
+            expandedSections: expandedSections,
+            expandedDirs: expandedDirs
+        )
+        guard let target = adjacentSidebarSelection(from: selection, in: items, direction: direction) else {
+            return .ignored
+        }
+        selection = target
+        return .handled
     }
 
     // MARK: - State

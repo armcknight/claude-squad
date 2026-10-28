@@ -52,7 +52,7 @@ filter matches only `X.Y.Z`.
 - [x] Automated signing, notarization, and release (shared GitHub Actions workflow rather than fastlane)
 - [x] Clean/dirty git index, # unpushed commits, # commits available remotely per session
 - [ ] Auto-update mechanism (Sparkle or similar)
-- [ ] Keyboard navigation in session list
+- [x] Keyboard navigation in session list
 - [ ] Swift 6 concurrency warnings — `TranscriptLoader.swift:28` mutates a main-actor property from a nonisolated context, and `:71` captures `var self` in concurrently-executing code. Both are warnings today and errors under the Swift 6 language mode, so they block adopting it.
 - [ ] Collapse the list of subagents under a root agent, so a session that spawned many of them can be folded down to a single row
 - [x] Inject Git information into Plist and Sentry scope
