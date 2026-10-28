@@ -21,10 +21,20 @@ struct SessionRowView: View {
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(displayNameOverride ?? session.displayName)
-                    .fontWeight(.medium)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+                HStack(spacing: 4) {
+                    if let mode = session.permissionMode, mode.showsWarning {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                            .help(mode.warningDescription)
+                            .accessibilityLabel(mode.warningDescription)
+                    }
+
+                    Text(displayNameOverride ?? session.displayName)
+                        .fontWeight(.medium)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
 
                 HStack(spacing: 4) {
                     if let branch = session.gitBranch {

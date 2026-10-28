@@ -18,6 +18,11 @@ final class ClaudeSessionDetector {
     /// How many lines to read from the tail of each JSONL file.
     private let tailLineCount = 20
 
+    /// How many lines to read from the tail when looking for the latest
+    /// `permissionMode`. Claude Code writes it on each user turn, so a long
+    /// tool-heavy turn can push it further back than `tailLineCount`.
+    private let permissionModeTailLineCount = 100
+
     /// How many lines to scan from the head looking for session metadata.
     private let headScanLineCount = 20
 
@@ -320,6 +325,19 @@ final class ClaudeSessionDetector {
         // Find PR URL.
         let prURL = findPullRequestURL(jsonlPath: jsonlPath)
 
+        // Permission mode. If the tail has no entry for it, keep the last
+        // known value from a previous analysis of this file.
+        let permissionMode: PermissionMode?
+        let permissionModeTail = readTailLines(filePath: jsonlPath, lineCount: permissionModeTailLineCount)
+        if let rawMode = readPermissionMode(tailLines: permissionModeTail) {
+            permissionMode = PermissionMode(rawValue: rawMode)
+            if permissionMode == nil {
+                logger?.warning("Unknown permissionMode \"\(rawMode)\" in \(fileName)")
+            }
+        } else {
+            permissionMode = sessionCache[jsonlPath]?.session.permissionMode
+        }
+
         var session = ClaudeSession(
             id: sessionId,
             projectPath: cwd,
@@ -335,6 +353,7 @@ final class ClaudeSessionDetector {
         session.pullRequestURL = prURL
         session.jsonlPath = jsonlPath
         session.subagents = subagents
+        session.permissionMode = permissionMode
         logger?.debug("  -> \(session.displayName) own=[\(ownStatus)] effective=[\(status)] subagents=\(subagents.count)")
         return session
     }
@@ -715,6 +734,27 @@ final class ClaudeSessionDetector {
         }
 
         return .inactive(lastActivity: lastModified)
+    }
+
+    /// Returns the raw value of the most recent `permissionMode` field in the
+    /// tail lines, or nil if no line has one. Claude Code writes this field on
+    /// `permission-mode` entries and on `user` message entries.
+    func readPermissionMode(tailLines: [String]) -> String? {
+        for line in tailLines.reversed() {
+            // Cheap check before the JSON parse; most lines do not have the field.
+            guard line.contains("\"permissionMode\"") else { continue }
+            let json: [String: Any]?
+            do {
+                json = try JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any]
+            } catch {
+                logger?.debug("    Cannot parse JSONL line for permissionMode: \(error)")
+                continue
+            }
+            if let mode = json?["permissionMode"] as? String {
+                return mode
+            }
+        }
+        return nil
     }
 
     /// Checks whether the last assistant message in the tail lines is followed by a

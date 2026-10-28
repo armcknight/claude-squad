@@ -356,6 +356,9 @@ struct ClaudeSession: Identifiable {
     /// Subagents spawned from this session, in launch order.
     var subagents: [Subagent] = []
 
+    /// Most recent Claude Code permission mode recorded in the JSONL, if any.
+    var permissionMode: PermissionMode?
+
     /// Stable transcript loader key.
     var transcriptKey: String { "session:\(id)" }
 
@@ -381,6 +384,7 @@ extension ClaudeSession: Comparable {
             && lhs.gitBranch == rhs.gitBranch
             && lhs.gitStatus == rhs.gitStatus
             && lhs.subagents == rhs.subagents
+            && lhs.permissionMode == rhs.permissionMode
     }
 }
 
