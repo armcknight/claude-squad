@@ -38,6 +38,12 @@ enum AnalyticsEvent: String {
     // Settings
     case pollIntervalChanged = "poll_interval_changed"
 
+    // Updates
+    case updateCheckManual = "update_check_manual"
+    case updateFound = "update_found"
+    case updateInstalling = "update_installing"
+    case autoUpdateCheckToggled = "auto_update_check_toggled"
+
     // Actions
     case copyPath = "copy_path"
     case copyBranch = "copy_branch"

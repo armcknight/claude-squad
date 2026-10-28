@@ -14,6 +14,11 @@ name: Release
 # Required repo secrets (see armcknight/workflows README): TAP_RELEASE_TOKEN,
 # MATCH_PASSWORD, MATCH_DEPLOY_KEY, NOTARY_KEY, NOTARY_KEY_ID, NOTARY_ISSUER_ID,
 # SENTRYDSN.
+#
+# The `appcast` job then signs the released zip with Sparkle's EdDSA key and adds it to
+# docs/appcast.xml on main, which GitHub Pages serves as the in-app update feed. It needs
+# the SPARKLE_PRIVATE_KEY secret (the private half of SPARKLE_PUBLIC_ED_KEY in
+# config/ClaudeSquad.xcconfig); without it the job warns and skips.
 
 on:
   push:
@@ -41,3 +46,66 @@ jobs:
       # delaunay/dough/mtg/babysittr.
       arkana-keys: SentryDSN
     secrets: inherit
+
+  appcast:
+    name: Publish Sparkle appcast
+    needs: release
+    runs-on: macos-15
+    permissions:
+      contents: write
+    env:
+      SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+      VERSION: ${{ needs.release.outputs.version }}
+      ASSET: ${{ needs.release.outputs.asset }}
+      # The reusable workflow attaches the zip to a `<cask-name>-<version>` release on the tap.
+      DOWNLOAD_URL: https://github.com/armcknight/homebrew-tools/releases/download/claude-squad-${{ needs.release.outputs.version }}/${{ needs.release.outputs.asset }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Check for signing key
+        id: key
+        run: |
+          if [ -z "${SPARKLE_PRIVATE_KEY:-}" ]; then
+            echo "::warning::SPARKLE_PRIVATE_KEY is not set; skipping the appcast update. Installed apps will not see ${VERSION}."
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.key.outputs.present == 'true'
+        with:
+          ref: main
+
+      - name: Download Sparkle tools
+        if: steps.key.outputs.present == 'true'
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/sparkle"
+          gh release download --repo sparkle-project/Sparkle --pattern 'Sparkle-[0-9]*.tar.xz' --dir "${RUNNER_TEMP}/sparkle"
+          tar -xJf "${RUNNER_TEMP}"/sparkle/Sparkle-*.tar.xz -C "${RUNNER_TEMP}/sparkle"
+
+      - name: Sign release and update appcast
+        if: steps.key.outputs.present == 'true'
+        run: |
+          set -euo pipefail
+          curl -fsSL -o "${RUNNER_TEMP}/${ASSET}" "$DOWNLOAD_URL"
+          KEY_FILE="${RUNNER_TEMP}/sparkle_private_key"
+          printf '%s' "$SPARKLE_PRIVATE_KEY" > "$KEY_FILE"
+          SIGNATURE_ATTRS="$("${RUNNER_TEMP}/sparkle/bin/sign_update" --ed-key-file "$KEY_FILE" "${RUNNER_TEMP}/${ASSET}")"
+          rm -f "$KEY_FILE"
+          MIN_OS="$(sed -nE 's/^MACOSX_DEPLOYMENT_TARGET = (.*)$/\1/p' config/Project.xcconfig)"
+          ./scripts/update-appcast.sh docs/appcast.xml "$VERSION" "$DOWNLOAD_URL" "$SIGNATURE_ATTRS" "$MIN_OS"
+
+      - name: Commit appcast
+        if: steps.key.outputs.present == 'true'
+        run: |
+          set -euo pipefail
+          if git diff --quiet; then
+            echo "appcast unchanged"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/appcast.xml
+          git commit -m "chore(appcast): publish ${VERSION}"
+          git push origin HEAD:main

@@ -4,6 +4,9 @@ packages:
   SwiftyBeaver:
     url: https://github.com/SwiftyBeaver/SwiftyBeaver
     version: 2.1.1
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    from: 2.6.0
   ArkanaKeys:
     path: ./ArkanaKeys/ArkanaKeys
   ArkanaKeysInterfaces:
@@ -62,6 +65,7 @@ targets:
         script: "${SRCROOT}/scripts/inject-git-info.sh"
     dependencies:
       - package: SwiftyBeaver
+      - package: Sparkle
       - target: Sentry/Sentry
       - package: ArkanaKeys
       - package: ArkanaKeysInterfaces
