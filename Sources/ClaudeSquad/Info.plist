@@ -23,8 +23,10 @@
 	<key>LSMinimumSystemVersion</key>
 	<string>$(MACOSX_DEPLOYMENT_TARGET)</string>
 	<key>GIT_COMMIT_HASH</key>
-	<string>$(GIT_COMMIT_HASH)</string>
-	<key>GIT_BRANCH_NAME</key>
-	<string>$(GIT_BRANCH_NAME)</string>
+	<string></string>
+	<key>GIT_BRANCH</key>
+	<string></string>
+	<key>GIT_STATUS_CLEAN</key>
+	<string></string>
 </dict>
 </plist>

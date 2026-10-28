@@ -54,8 +54,11 @@ final class SentryErrorReporter: ErrorReporter {
             if let gitCommit = info?["GIT_COMMIT_HASH"] as? String, !gitCommit.isEmpty {
                 scope.setTag(value: gitCommit, key: "git.commit")
             }
-            if let gitBranch = info?["GIT_BRANCH_NAME"] as? String, !gitBranch.isEmpty {
+            if let gitBranch = info?["GIT_BRANCH"] as? String, !gitBranch.isEmpty {
                 scope.setTag(value: gitBranch, key: "git.branch")
+            }
+            if let gitStatusClean = info?["GIT_STATUS_CLEAN"] as? String, !gitStatusClean.isEmpty {
+                scope.setTag(value: gitStatusClean, key: "git.clean")
             }
             if let appVersion = info?["CFBundleShortVersionString"] as? String {
                 scope.setTag(value: appVersion, key: "app.version")

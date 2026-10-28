@@ -8,6 +8,7 @@ macOS menubar app that monitors Claude Code CLI sessions.
 - Run `make xcode` to regenerate the Xcode project any time files are added/removed or target membership changes.
 - The project uses XcodeGen (`project.yml`) to generate `ClaudeSquad.xcodeproj`.
 - Deployment target: macOS 14.0
+- Build phases use CLI tools from the [armcknight/tools](https://github.com/armcknight/tools) Homebrew cask (`inject-git-info`, `upload-symbols`); `make init` installs it via `brew bundle`.
 
 ## Swift Best Practices
 

@@ -94,8 +94,11 @@ struct SettingsView: View {
             if let commit = Bundle.main.infoDictionary?["GIT_COMMIT_HASH"] as? String, !commit.isEmpty {
                 LabeledContent("Commit", value: commit)
             }
-            if let branch = Bundle.main.infoDictionary?["GIT_BRANCH_NAME"] as? String, !branch.isEmpty {
+            if let branch = Bundle.main.infoDictionary?["GIT_BRANCH"] as? String, !branch.isEmpty {
                 LabeledContent("Branch", value: branch)
+            }
+            if let clean = Bundle.main.infoDictionary?["GIT_STATUS_CLEAN"] as? String, !clean.isEmpty {
+                LabeledContent("Clean Working Tree", value: clean)
             }
         }
         .formStyle(.grouped)
