@@ -29,8 +29,15 @@ final class SessionMonitor: ObservableObject {
     /// Tracks the last-known status type per session for transition detection.
     private var previousStatusType: [String: Int] = [:]
 
+    /// Whether at least one refresh has been processed. Sessions already
+    /// waiting at launch don't fire `onNeedsAttention`.
+    private var hasCompletedInitialRefresh = false
+
     /// Callback fired when a session transitions to a state needing attention.
     var onNeedsAttention: ((_ session: ClaudeSession) -> Void)?
+
+    /// Set to ask the UI to select a session (e.g. after a notification click).
+    @Published var requestedSelection: SidebarSelection?
 
     init(detector: ClaudeSessionDetector, refreshInterval: TimeInterval) {
         self.detector = detector
@@ -195,13 +202,18 @@ final class SessionMonitor: ObservableObject {
     // MARK: - Transition detection
 
     /// Fires `onNeedsAttention` when a session newly transitions to a waiting state.
-    private func checkTransitions(newSessions: [ClaudeSession]) {
+    /// Sessions already waiting on the first refresh after launch are recorded
+    /// without notifying, to avoid a burst of stale notifications.
+    func checkTransitions(newSessions: [ClaudeSession]) {
+        let isInitialRefresh = !hasCompletedInitialRefresh
+        hasCompletedInitialRefresh = true
+
         for session in newSessions {
             let currentType = session.status.sortPriority
             let previousType = previousStatusType[session.id]
 
             // Notify if transitioned TO a waiting state from something else.
-            if session.status.isWaiting && previousType != currentType {
+            if session.status.isWaiting && previousType != currentType && !isInitialRefresh {
                 logger?.info("Session \(session.displayName) transitioned to waiting (priority \(currentType))")
                 onNeedsAttention?(session)
             }

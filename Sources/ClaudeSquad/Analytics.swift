@@ -37,6 +37,11 @@ enum AnalyticsEvent: String {
 
     // Settings
     case pollIntervalChanged = "poll_interval_changed"
+    case notificationSettingChanged = "notification_setting_changed"
+
+    // Notifications
+    case notificationPosted = "notification_posted"
+    case notificationClicked = "notification_clicked"
 
     // Actions
     case copyPath = "copy_path"

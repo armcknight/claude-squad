@@ -70,6 +70,11 @@ struct SessionListView: View {
         } detail: {
             detailPane
         }
+        .onChange(of: monitor.requestedSelection) { _, newValue in
+            guard let newValue else { return }
+            selection = newValue
+            monitor.requestedSelection = nil
+        }
     }
 
     @ViewBuilder
