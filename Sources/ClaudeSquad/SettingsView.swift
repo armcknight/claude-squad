@@ -1,3 +1,4 @@
+import Pippin
 import SwiftUI
 
 struct SettingsView: View {
@@ -91,10 +92,10 @@ struct SettingsView: View {
             if let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String {
                 LabeledContent("Build", value: build)
             }
-            if let commit = Bundle.main.infoDictionary?["GIT_COMMIT_HASH"] as? String, !commit.isEmpty {
-                LabeledContent("Commit", value: commit)
+            if let commit = Bundle.main.gitCommitHash {
+                LabeledContent("Commit", value: Bundle.main.gitStatusClean ? commit : "\(commit)-dirty")
             }
-            if let branch = Bundle.main.infoDictionary?["GIT_BRANCH_NAME"] as? String, !branch.isEmpty {
+            if let branch = Bundle.main.gitBranch {
                 LabeledContent("Branch", value: branch)
             }
         }

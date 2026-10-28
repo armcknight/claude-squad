@@ -1,3 +1,6 @@
 [submodule "sentry-cocoa"]
 	path = sentry-cocoa
 	url = https://github.com/getsentry/sentry-cocoa.git
+[submodule "Pippin"]
+	path = Pippin
+	url = https://github.com/TwoRingSoft/Pippin.git

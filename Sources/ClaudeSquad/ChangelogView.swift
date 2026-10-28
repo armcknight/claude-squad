@@ -1,3 +1,4 @@
+import Pippin
 import SwiftUI
 
 struct ChangelogView: View {
@@ -23,7 +24,7 @@ struct ChangelogView: View {
                     Text("No changelog entries found.")
                         .foregroundStyle(.secondary)
                 } else {
-                    ForEach(entries) { entry in
+                    ForEach(entries, id: \.version) { entry in
                         ChangelogEntryView(entry: entry)
                     }
                 }
@@ -44,9 +45,11 @@ private struct ChangelogEntryView: View {
                     .font(.title2)
                     .fontWeight(.semibold)
                 Spacer()
-                Text(entry.date)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                if let date = entry.date {
+                    Text(date)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
             }
 
             Text(formatContent(entry.content))

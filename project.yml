@@ -8,6 +8,8 @@ packages:
     path: ./ArkanaKeys/ArkanaKeys
   ArkanaKeysInterfaces:
     path: ./ArkanaKeys/ArkanaKeysInterfaces
+  Pippin:
+    path: ./Pippin
 
 projectReferences:
   Sentry:
@@ -65,6 +67,8 @@ targets:
       - target: Sentry/Sentry
       - package: ArkanaKeys
       - package: ArkanaKeysInterfaces
+      - package: Pippin
+        product: PippinCore
     configFiles:
       Debug: config/ClaudeSquad.xcconfig
       Release: config/ClaudeSquad.xcconfig
