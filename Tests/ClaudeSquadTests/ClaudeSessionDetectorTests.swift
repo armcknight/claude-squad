@@ -336,7 +336,8 @@ final class ClaudeSessionDetectorTests: XCTestCase {
     /// against it. Returns the resulting `ClaudeSession`.
     private func makeSessionTree(
         parentLastBlock: String,
-        subagents: [(agentId: String, agentType: String, description: String, slug: String, lastBlock: String, nested: [(agentId: String, agentType: String, description: String, slug: String, lastBlock: String)])] = []
+        subagents: [(agentId: String, agentType: String, description: String, slug: String, lastBlock: String, nested: [(agentId: String, agentType: String, description: String, slug: String, lastBlock: String)])] = [],
+        subagentAge: TimeInterval = 0
     ) throws -> (session: ClaudeSession, root: String) {
         let root = (NSTemporaryDirectory() as NSString)
             .appendingPathComponent("detector_test_\(UUID().uuidString)")
@@ -360,6 +361,7 @@ final class ClaudeSessionDetectorTests: XCTestCase {
                     "{\"type\":\"assistant\",\"isSidechain\":true,\"agentId\":\"\(sub.agentId)\",\"message\":{\"role\":\"assistant\",\"content\":[\(sub.lastBlock)]}}"
                 ]
                 try subLines.joined(separator: "\n").write(toFile: subPath, atomically: true, encoding: .utf8)
+                try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-subagentAge)], ofItemAtPath: subPath)
                 let metaJSON = "{\"agentType\":\"\(sub.agentType)\",\"description\":\"\(sub.description)\"}"
                 try metaJSON.write(toFile: metaPath, atomically: true, encoding: .utf8)
 
@@ -482,6 +484,49 @@ final class ClaudeSessionDetectorTests: XCTestCase {
 
         if case .waitingForQuestion = session.status { } else {
             XCTFail("rolled-up status should be waitingForQuestion from nested sub, got \(session.status)")
+        }
+    }
+
+    func test_rollUpStatus_ignoresFinishedIdleSubagent() throws {
+        // Parent: Bash tool_use, fresh → ownStatus = running.
+        // Subagent: ended its turn with text → waitingIdle (finished).
+        let (session, root) = try makeSessionTree(
+            parentLastBlock: "{\"type\":\"tool_use\",\"id\":\"t1\",\"name\":\"Bash\"}",
+            subagents: [
+                (agentId: "done", agentType: "Explore", description: "finished",
+                 slug: "done-slug", lastBlock: "{\"type\":\"text\",\"text\":\"All done.\"}", nested: [])
+            ]
+        )
+        defer { try? FileManager.default.removeItem(atPath: root)
+                try? FileManager.default.removeItem(atPath: root + ".jsonl") }
+
+        if case .waitingIdle = session.subagents.first?.status { } else {
+            XCTFail("subagent status should be waitingIdle, got \(String(describing: session.subagents.first?.status))")
+        }
+        if case .running = session.status { } else {
+            XCTFail("rolled-up status should stay running, got \(session.status)")
+        }
+    }
+
+    func test_rollUpStatus_ignoresStaleSubagent() throws {
+        // Subagent stopped mid-tool-use long before the parent's latest write,
+        // so it looks like it is waiting for approval, but the parent moved on.
+        let (session, root) = try makeSessionTree(
+            parentLastBlock: "{\"type\":\"tool_use\",\"id\":\"t1\",\"name\":\"Bash\"}",
+            subagents: [
+                (agentId: "stale", agentType: "general-purpose", description: "killed",
+                 slug: "stale-slug", lastBlock: "{\"type\":\"tool_use\",\"name\":\"Bash\",\"id\":\"x\"}", nested: [])
+            ],
+            subagentAge: 600
+        )
+        defer { try? FileManager.default.removeItem(atPath: root)
+                try? FileManager.default.removeItem(atPath: root + ".jsonl") }
+
+        if case .waitingForQuestion = session.subagents.first?.status { } else {
+            XCTFail("stale subagent status should be waitingForQuestion, got \(String(describing: session.subagents.first?.status))")
+        }
+        if case .running = session.status { } else {
+            XCTFail("rolled-up status should stay running, got \(session.status)")
         }
     }
 
